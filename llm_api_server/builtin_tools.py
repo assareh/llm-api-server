@@ -7,8 +7,13 @@ Users can import individual tools or use the BUILTIN_TOOLS collection.
 import ast
 import operator
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from langchain_core.tools import tool
+from langchain_core.tools import Tool, tool
+from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from .config import ServerConfig
 
 
 @tool
@@ -90,6 +95,51 @@ def calculate(expression: str) -> str:
         return f"Error evaluating expression: {e}"
 
 
+class WebSearchInput(BaseModel):
+    """Input schema for web search tool."""
+
+    query: str = Field(
+        description="The search query (e.g., 'Python async programming best practices', 'Docker container networking')"
+    )
+    max_results: int = Field(default=10, description="Maximum number of results to return. Default is 10.")
+    site: str = Field(default="", description="Optional site restriction (e.g., 'hashicorp.com')")
+
+
+def create_web_search_tool(config: "ServerConfig") -> Tool:
+    """Create a web search tool configured with the given ServerConfig.
+
+    This tool requires the optional 'websearch' dependency.
+    Install with: uv sync --extra websearch
+
+    The tool will try Ollama web search API first (if OLLAMA_API_KEY is configured),
+    then fall back to DuckDuckGo search.
+
+    Args:
+        config: ServerConfig instance with OLLAMA_API_KEY (optional)
+
+    Returns:
+        LangChain Tool for web search
+
+    Example:
+        >>> from llm_api_server import ServerConfig, create_web_search_tool
+        >>> config = ServerConfig.from_env()
+        >>> web_search = create_web_search_tool(config)
+        >>> tools = [get_current_date, calculate, web_search]
+    """
+    from .web_search_tool import web_search
+
+    def _web_search_wrapper(query: str, max_results: int = 10, site: str = "") -> str:
+        """Wrapper that provides API key from config."""
+        return web_search(query, max_results, site, ollama_api_key=config.OLLAMA_API_KEY)
+
+    return Tool(
+        name="web_search",
+        description="Search the web for general information using Ollama API (if configured) or DuckDuckGo. Use this for finding current information, documentation, tutorials, Stack Overflow answers, or any online resources. Returns titles, URLs, and descriptions of relevant pages.",
+        func=_web_search_wrapper,
+        args_schema=WebSearchInput,
+    )
+
+
 # Collection of all built-in tools
 BUILTIN_TOOLS = [
     get_current_date,
@@ -99,6 +149,8 @@ BUILTIN_TOOLS = [
 
 __all__ = [
     "BUILTIN_TOOLS",
+    "WebSearchInput",
     "calculate",
+    "create_web_search_tool",
     "get_current_date",
 ]

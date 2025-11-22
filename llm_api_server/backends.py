@@ -1,12 +1,13 @@
 """Backend communication for Ollama and LM Studio."""
 
 import time
-from typing import Any, Callable, Dict, List, Tuple
+from collections.abc import Callable
+from typing import Any
 
 import requests
 
 
-def get_tool_schema(tool) -> Dict[str, Any]:
+def get_tool_schema(tool) -> dict[str, Any]:
     """Extract schema from LangChain tool (handles both pydantic v1 and v2)."""
     if hasattr(tool.args_schema, "model_json_schema"):
         return tool.args_schema.model_json_schema()
@@ -55,7 +56,7 @@ def _retry_on_connection_error(func: Callable, config, *args, **kwargs):
     raise last_exception
 
 
-def call_ollama(messages: List[Dict], tools: List, config, temperature: float = 0.0, stream: bool = False):
+def call_ollama(messages: list[dict], tools: list, config, temperature: float = 0.0, stream: bool = False):
     """Call Ollama with tool support."""
     endpoint = f"{config.OLLAMA_ENDPOINT}/api/chat"
 
@@ -89,7 +90,7 @@ def call_ollama(messages: List[Dict], tools: List, config, temperature: float = 
     return _retry_on_connection_error(_make_request, config)
 
 
-def call_lmstudio(messages: List[Dict], tools: List, config, temperature: float = 0.0, stream: bool = False):
+def call_lmstudio(messages: list[dict], tools: list, config, temperature: float = 0.0, stream: bool = False):
     """Call LM Studio with tool support."""
     endpoint = f"{config.LMSTUDIO_ENDPOINT}/chat/completions"
 
@@ -123,7 +124,7 @@ def call_lmstudio(messages: List[Dict], tools: List, config, temperature: float 
     return _retry_on_connection_error(_make_request, config)
 
 
-def check_ollama_health(config, timeout: int = 5) -> Tuple[bool, str]:
+def check_ollama_health(config, timeout: int = 5) -> tuple[bool, str]:
     """Check if Ollama backend is healthy and reachable.
 
     Args:
@@ -160,7 +161,7 @@ def check_ollama_health(config, timeout: int = 5) -> Tuple[bool, str]:
         return False, f"Ollama health check failed: {e!s}"
 
 
-def check_lmstudio_health(config, timeout: int = 5) -> Tuple[bool, str]:
+def check_lmstudio_health(config, timeout: int = 5) -> tuple[bool, str]:
     """Check if LM Studio backend is healthy and reachable.
 
     Args:

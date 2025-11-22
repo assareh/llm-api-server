@@ -5,9 +5,10 @@ import logging
 import re
 import time
 import traceback
+from collections.abc import Callable, Generator
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, List, Optional
+from typing import Any
 
 import requests
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -24,11 +25,11 @@ class LLMServer:
         self,
         name: str,
         model_name: str,
-        tools: List,
+        tools: list,
         config: ServerConfig,
         default_system_prompt: str = "You are a helpful AI assistant.",
-        init_hook: Optional[Callable] = None,
-        logger_names: Optional[List[str]] = None,
+        init_hook: Callable | None = None,
+        logger_names: list[str] | None = None,
     ):
         """Initialize LLM API Server.
 
@@ -49,8 +50,8 @@ class LLMServer:
         self.init_hook = init_hook
 
         # System prompt caching
-        self._system_prompt_cache: Optional[str] = None
-        self._system_prompt_mtime: Optional[float] = None
+        self._system_prompt_cache: str | None = None
+        self._system_prompt_mtime: float | None = None
 
         # WebUI process
         self._webui_process = None
@@ -123,7 +124,7 @@ class LLMServer:
             print(f"Error reading system prompt: {e}")
             return self.default_system_prompt
 
-    def execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> str:
+    def execute_tool(self, tool_name: str, tool_input: dict[str, Any]) -> str:
         """Execute a tool by name with given input."""
         # Log tool call
         if self.config.DEBUG_TOOLS:
@@ -170,7 +171,7 @@ class LLMServer:
 
         return not_found_msg
 
-    def call_backend(self, messages: List[Dict], temperature: float, stream: bool = False):
+    def call_backend(self, messages: list[dict], temperature: float, stream: bool = False):
         """Call the configured backend."""
         if self.config.BACKEND_TYPE == "ollama":
             return call_ollama(messages, self.tools, self.config, temperature, stream)
@@ -195,7 +196,7 @@ class LLMServer:
 
         return is_healthy
 
-    def process_chat_completion(self, messages: List[Dict], temperature: float, max_iterations: int = 5) -> Dict:
+    def process_chat_completion(self, messages: list[dict], temperature: float, max_iterations: int = 5) -> dict:
         """Process chat completion with tool calling loop (non-streaming)."""
         # Add system prompt
         system_prompt = self.get_system_prompt()
@@ -211,7 +212,9 @@ class LLMServer:
                 response_data = response.json()
             except requests.Timeout:
                 backend_endpoint = (
-                    self.config.LMSTUDIO_ENDPOINT if self.config.BACKEND_TYPE == "lmstudio" else self.config.OLLAMA_ENDPOINT
+                    self.config.LMSTUDIO_ENDPOINT
+                    if self.config.BACKEND_TYPE == "lmstudio"
+                    else self.config.OLLAMA_ENDPOINT
                 )
                 error_content = (
                     f"Backend request timed out after {self.config.BACKEND_READ_TIMEOUT}s.\n\n"
@@ -240,7 +243,9 @@ class LLMServer:
                 }
             except requests.ConnectionError as e:
                 backend_endpoint = (
-                    self.config.LMSTUDIO_ENDPOINT if self.config.BACKEND_TYPE == "lmstudio" else self.config.OLLAMA_ENDPOINT
+                    self.config.LMSTUDIO_ENDPOINT
+                    if self.config.BACKEND_TYPE == "lmstudio"
+                    else self.config.OLLAMA_ENDPOINT
                 )
                 error_content = (
                     f"Could not connect to {self.config.BACKEND_TYPE} backend.\n\n"
@@ -332,7 +337,7 @@ class LLMServer:
         }
 
     def stream_chat_response(
-        self, messages: List[Dict], temperature: float, max_iterations: int = 5
+        self, messages: list[dict], temperature: float, max_iterations: int = 5
     ) -> Generator[str, None, None]:
         """Stream chat completion with tool calling loop."""
         system_prompt = self.get_system_prompt()
@@ -348,7 +353,9 @@ class LLMServer:
                 response_data = response.json()
             except requests.Timeout:
                 backend_endpoint = (
-                    self.config.LMSTUDIO_ENDPOINT if self.config.BACKEND_TYPE == "lmstudio" else self.config.OLLAMA_ENDPOINT
+                    self.config.LMSTUDIO_ENDPOINT
+                    if self.config.BACKEND_TYPE == "lmstudio"
+                    else self.config.OLLAMA_ENDPOINT
                 )
                 error_content = (
                     f"Backend request timed out after {self.config.BACKEND_READ_TIMEOUT}s.\n\n"
@@ -368,7 +375,9 @@ class LLMServer:
                 return
             except requests.ConnectionError as e:
                 backend_endpoint = (
-                    self.config.LMSTUDIO_ENDPOINT if self.config.BACKEND_TYPE == "lmstudio" else self.config.OLLAMA_ENDPOINT
+                    self.config.LMSTUDIO_ENDPOINT
+                    if self.config.BACKEND_TYPE == "lmstudio"
+                    else self.config.OLLAMA_ENDPOINT
                 )
                 error_content = (
                     f"Could not connect to {self.config.BACKEND_TYPE} backend.\n\n"
@@ -523,7 +532,7 @@ class LLMServer:
 
         except Exception as e:
             error_details = {
-                "error": f"{type(e).__name__}: {str(e)}",
+                "error": f"{type(e).__name__}: {e!s}",
                 "type": type(e).__name__,
                 "endpoint": "/v1/chat/completions",
             }
@@ -537,11 +546,11 @@ class LLMServer:
 
     def run(
         self,
-        port: Optional[int] = None,
-        host: Optional[str] = None,
+        port: int | None = None,
+        host: str | None = None,
         debug: bool = False,
         start_webui: bool = True,
-        threaded: Optional[bool] = None,
+        threaded: bool | None = None,
     ):
         """Run the Flask server.
 

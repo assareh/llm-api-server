@@ -62,14 +62,16 @@ All linting settings in `pyproject.toml`:
 ```
 llm-api-server/
 ├── llm_api_server/
-│   ├── __init__.py       # Package exports
-│   ├── server.py         # Core LLMServer class
-│   ├── backends.py       # Backend integrations
-│   ├── config.py         # ServerConfig base class
-│   └── webui.py          # Open Web UI integration
-├── setup.py              # Package installation
-├── pyproject.toml        # Packaging & linting config
-└── README.md             # Package documentation
+│   ├── __init__.py         # Package exports
+│   ├── server.py           # Core LLMServer class
+│   ├── backends.py         # Backend integrations
+│   ├── config.py           # ServerConfig base class
+│   ├── builtin_tools.py    # Built-in tools (date, calculate, web search)
+│   ├── web_search_tool.py  # Web search implementation (Ollama + DuckDuckGo)
+│   └── webui.py            # Open Web UI integration
+├── setup.py                # Package installation
+├── pyproject.toml          # Packaging & linting config
+└── README.md               # Package documentation
 ```
 
 ### Making Changes
@@ -77,7 +79,9 @@ llm-api-server/
 1. **Core server** (`server.py`): Flask app, routing, tool calling loop
 2. **Backends** (`backends.py`): Ollama/LM Studio communication
 3. **Config** (`config.py`): Configuration and environment loading
-4. **Web UI** (`webui.py`): Open Web UI subprocess management
+4. **Built-in tools** (`builtin_tools.py`): Common tools (date, calculate, web search factory)
+5. **Web search** (`web_search_tool.py`): Ollama API + DuckDuckGo fallback implementation
+6. **Web UI** (`webui.py`): Open Web UI subprocess management
 
 ### Adding Features
 
@@ -110,10 +114,12 @@ Since this is a framework library:
 
 ```bash
 # Using uv (recommended)
-uv sync              # Install core dependencies
-uv sync --extra dev  # With development tools
-uv sync --extra webui  # With Open Web UI
-uv sync --all-extras  # Everything
+uv sync                   # Install core dependencies
+uv sync --extra dev       # With development tools
+uv sync --extra webui     # With Open Web UI
+uv sync --extra websearch # With web search tool
+uv sync --extra eval      # With HTML report markdown formatting
+uv sync --all-extras      # Everything
 
 # Using pip (legacy)
 pip install -e .
@@ -175,6 +181,58 @@ config = ServerConfig.from_env("MYAPP_")
 - **Ollama**: Native Ollama API format
 - **LM Studio**: OpenAI-compatible format
 - **Tool calling**: Automatic conversion and execution
+
+### Built-in Tools
+
+The framework provides reusable tools:
+
+**Always available:**
+- `get_current_date()` - Returns current date in YYYY-MM-DD format
+- `calculate(expression)` - Safe mathematical expression evaluator
+
+**Optional (requires `--extra websearch`):**
+- `create_web_search_tool(config)` - Web search with dual strategy:
+  - Tries Ollama web search API if `OLLAMA_API_KEY` is configured
+  - Falls back to DuckDuckGo search (free, rate-limited)
+  - Supports site filtering: `site:hashicorp.com query`
+  - Implementation: `llm_api_server/web_search_tool.py`
+
+**Usage:**
+```python
+from llm_api_server import BUILTIN_TOOLS, create_web_search_tool
+
+# With web search
+web_search = create_web_search_tool(config)
+tools = BUILTIN_TOOLS + [web_search]
+```
+
+### Evaluation Framework
+
+The framework includes a comprehensive evaluation system in `llm_api_server/eval/`:
+
+**Components:**
+- `Evaluator` - Runs test cases against LLM API
+- `TestCase` - Defines questions and validation rules
+- `TestResult` - Contains test outcomes and metrics
+- `HTMLReporter` - Generates beautiful HTML reports with markdown formatting
+- `JSONReporter` - Machine-readable JSON output
+- `ConsoleReporter` - Terminal-friendly output
+
+**HTML Report Features (requires `--extra eval`):**
+- **Markdown to HTML conversion** using `markdown` library
+- **Full responses** - No truncation, all content visible
+- **Collapsible sections** - Long responses start collapsed with expand/collapse buttons
+- **Syntax highlighting** - Code blocks, tables, lists, blockquotes
+- **Professional styling** - Dark code blocks, formatted tables, styled blockquotes
+- Implementation: `llm_api_server/eval/reporters.py:84-460`
+
+**Key files:**
+- `evaluator.py` - Test execution engine
+- `test_case.py` - Data models for tests and results
+- `reporters.py` - HTML/JSON/Console report generation
+- `validators.py` - Response validation logic
+
+See `llm_api_server/eval/README.md` for complete documentation.
 
 ## Consuming Projects
 

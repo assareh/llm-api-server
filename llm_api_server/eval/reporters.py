@@ -7,6 +7,14 @@ from pathlib import Path
 
 from .test_case import TestResult
 
+# Optional markdown support for HTML reports
+try:
+    import markdown
+
+    HAS_MARKDOWN = True
+except ImportError:
+    HAS_MARKDOWN = False
+
 
 class HTMLReporter:
     """Generate HTML reports from evaluation results."""
@@ -72,10 +80,35 @@ class HTMLReporter:
                 issues_list = "".join(f"<li>{html.escape(issue)}</li>" for issue in result.issues)
                 issues_html = f'<div class="issues"><ul>{issues_list}</ul></div>'
 
-            # Truncate response for display
-            response_display = html.escape(result.response[:500] if result.response else "N/A")
-            if result.response and len(result.response) > 500:
-                response_display += "..."
+            # Format response (convert markdown to HTML if available)
+            if result.response:
+                if HAS_MARKDOWN:
+                    # Convert markdown to HTML
+                    response_html = markdown.markdown(
+                        result.response,
+                        extensions=["fenced_code", "tables", "nl2br"],
+                    )
+                else:
+                    # Fallback: escape HTML and preserve line breaks
+                    response_html = html.escape(result.response).replace("\n", "<br>")
+
+                # Create collapsible response (collapsed by default if > 300 chars)
+                is_long = len(result.response) > 300
+                collapsed_class = "collapsed" if is_long else ""
+                toggle_btn = (
+                    f'<button class="toggle-btn" onclick="toggleResponse(this)">{"Expand" if is_long else "Collapse"}</button>'
+                    if is_long
+                    else ""
+                )
+
+                response_display = f"""
+                    {toggle_btn}
+                    <div class="response-content {collapsed_class}">
+                        {response_html}
+                    </div>
+                """
+            else:
+                response_display = '<div class="response-content">N/A</div>'
 
             row = f"""
             <tr class="{status_class}">
@@ -86,7 +119,7 @@ class HTMLReporter:
                 </td>
                 <td>{result.response_time:.2f}s</td>
                 <td>
-                    <div class="response">{response_display}</div>
+                    <div class="response-container">{response_display}</div>
                     {issues_html}
                 </td>
             </tr>
@@ -215,16 +248,112 @@ class HTMLReporter:
             color: #6b7280;
             font-style: italic;
         }}
-        .response {{
-            font-size: 13px;
-            line-height: 1.5;
-            color: #4b5563;
-            background: #f9fafb;
-            padding: 10px;
+        .response-container {{
+            position: relative;
+        }}
+        .toggle-btn {{
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 6px 12px;
             border-radius: 4px;
-            margin-top: 5px;
-            max-height: 200px;
-            overflow-y: auto;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            transition: background 0.2s;
+        }}
+        .toggle-btn:hover {{
+            background: #2563eb;
+        }}
+        .response-content {{
+            font-size: 13px;
+            line-height: 1.6;
+            color: #1f2937;
+            background: #f9fafb;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #e5e7eb;
+            overflow-x: auto;
+            transition: max-height 0.3s ease;
+        }}
+        .response-content.collapsed {{
+            max-height: 150px;
+            overflow: hidden;
+            position: relative;
+        }}
+        .response-content.collapsed::after {{
+            content: "";
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: linear-gradient(to bottom, transparent, #f9fafb);
+            pointer-events: none;
+        }}
+        /* Markdown styling */
+        .response-content h1, .response-content h2, .response-content h3 {{
+            margin-top: 16px;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #111827;
+        }}
+        .response-content h1 {{ font-size: 18px; }}
+        .response-content h2 {{ font-size: 16px; }}
+        .response-content h3 {{ font-size: 14px; }}
+        .response-content p {{
+            margin: 8px 0;
+        }}
+        .response-content code {{
+            background: #1f2937;
+            color: #10b981;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        }}
+        .response-content pre {{
+            background: #1f2937;
+            color: #e5e7eb;
+            padding: 12px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 12px 0;
+        }}
+        .response-content pre code {{
+            background: none;
+            color: inherit;
+            padding: 0;
+        }}
+        .response-content ul, .response-content ol {{
+            margin: 8px 0;
+            padding-left: 24px;
+        }}
+        .response-content li {{
+            margin: 4px 0;
+        }}
+        .response-content blockquote {{
+            border-left: 3px solid #3b82f6;
+            padding-left: 12px;
+            margin: 12px 0;
+            color: #6b7280;
+            font-style: italic;
+        }}
+        .response-content table {{
+            border-collapse: collapse;
+            width: 100%;
+            margin: 12px 0;
+        }}
+        .response-content table th,
+        .response-content table td {{
+            border: 1px solid #e5e7eb;
+            padding: 8px;
+            text-align: left;
+        }}
+        .response-content table th {{
+            background: #f3f4f6;
+            font-weight: 600;
         }}
         .issues, .error {{
             margin-top: 10px;
@@ -311,6 +440,21 @@ class HTMLReporter:
             Generated by LLM API Server Evaluation Framework
         </footer>
     </div>
+
+    <script>
+        function toggleResponse(button) {{
+            const responseContent = button.nextElementSibling;
+            const isCollapsed = responseContent.classList.contains('collapsed');
+
+            if (isCollapsed) {{
+                responseContent.classList.remove('collapsed');
+                button.textContent = 'Collapse';
+            }} else {{
+                responseContent.classList.add('collapsed');
+                button.textContent = 'Expand';
+            }}
+        }}
+    </script>
 </body>
 </html>"""
 

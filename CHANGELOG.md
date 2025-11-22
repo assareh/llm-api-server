@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-11-22
+
+### Added
+- **Web Search Tool** - Optional built-in tool for web searching
+  - Dual search strategy: Ollama web search API (premium) with DuckDuckGo fallback (free)
+  - `create_web_search_tool(config)` factory function
+  - Requires optional `websearch` extra: `uv sync --extra websearch`
+  - Uses `OLLAMA_API_KEY` from config if available
+  - Graceful fallback to DuckDuckGo when API unavailable or rate-limited
+  - Site filtering support (e.g., `site:hashicorp.com query`)
+  - Implementation: `llm_api_server/web_search_tool.py`
+
+- **Enhanced HTML Reports** - Beautiful markdown-formatted evaluation reports
+  - Full responses with no truncation (removed 500-character limit)
+  - Markdown to HTML conversion with `markdown` library
+  - Collapsible long responses (>300 chars) with expand/collapse buttons
+  - Syntax highlighting for code blocks
+  - Professional formatting for tables, lists, and blockquotes
+  - Smooth CSS transitions and modern styling
+  - Requires optional `eval` extra: `uv sync --extra eval`
+  - Implementation: `llm_api_server/eval/reporters.py:84-460`
+
+- **Configuration**
+  - Added `OLLAMA_API_KEY` to `ServerConfig` for web search authentication
+  - Environment variable support: `OLLAMA_API_KEY` or `<PREFIX>_OLLAMA_API_KEY`
+
+### Changed
+- HTML reports now display full responses instead of truncated previews
+- Code blocks in HTML reports use dark theme with syntax highlighting
+- Response sections are collapsible for better readability
+
+### Documentation
+- Updated README.md with web search tool usage and eval framework features
+- Updated CLAUDE.md with developer documentation for new features
+- Added installation instructions for `websearch` and `eval` extras
+
 ## [0.2.0] - 2025-11-22
 
 ### Added

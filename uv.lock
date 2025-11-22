@@ -2530,6 +2530,12 @@ dev = [
     { name = "pytest-mock" },
     { name = "ruff" },
 ]
+eval = [
+    { name = "markdown" },
+]
+websearch = [
+    { name = "duckduckgo-search" },
+]
 webui = [
     { name = "open-webui" },
 ]
@@ -2538,9 +2544,11 @@ webui = [
 requires-dist = [
     { name = "black", marker = "extra == 'dev'" },
     { name = "click", specifier = ">=8.1.0" },
+    { name = "duckduckgo-search", marker = "extra == 'websearch'", specifier = ">=5.0.0" },
     { name = "flask", specifier = ">=3.0.0" },
     { name = "flask-cors", specifier = ">=4.0.0" },
     { name = "langchain-core", specifier = ">=0.1.0" },
+    { name = "markdown", marker = "extra == 'eval'", specifier = ">=3.5.0" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "open-webui", marker = "extra == 'webui'" },
     { name = "pytest", marker = "extra == 'dev'" },
@@ -2549,7 +2557,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.31.0" },
     { name = "ruff", marker = "extra == 'dev'" },
 ]
-provides-extras = ["webui", "dev"]
+provides-extras = ["webui", "websearch", "eval", "dev"]
 
 [[package]]
 name = "loguru"

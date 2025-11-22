@@ -8,7 +8,11 @@ A reusable Flask server providing an OpenAI-compatible API for local LLM backend
 - **Multiple backends** - Supports Ollama and LM Studio
 - **Tool calling** - Full support for function calling with LangChain tools
 - **Streaming responses** - Real-time token streaming
-- **Evaluation framework** - Test and validate LLM responses with HTML reports
+- **Evaluation framework** - Test and validate LLM responses with beautiful HTML reports
+  - Full markdown-formatted responses (no truncation)
+  - Collapsible long responses with syntax highlighting
+  - Professional styling for code, tables, and lists
+- **Built-in tools** - Web search with Ollama API + DuckDuckGo fallback
 - **WebUI integration** - Optional Open Web UI frontend
 - **Smart caching** - System prompt auto-reload on file changes
 - **Debug logging** - Comprehensive tool execution logging
@@ -24,9 +28,11 @@ cd llm-api-server
 uv sync
 
 # With optional dependencies
-uv sync --extra webui  # For Open Web UI support
-uv sync --extra dev    # For development tools
-uv sync --all-extras   # Install everything
+uv sync --extra webui      # For Open Web UI support
+uv sync --extra websearch  # For web search tool
+uv sync --extra eval       # For HTML reports with markdown formatting
+uv sync --extra dev        # For development tools
+uv sync --all-extras       # Install everything
 ```
 
 ### Using pip
@@ -48,6 +54,12 @@ pip install -e .
 ```bash
 # For Open Web UI support
 pip install llm-api-server[webui]
+
+# For web search tool
+pip install llm-api-server[websearch]
+
+# For HTML reports with markdown formatting
+pip install llm-api-server[eval]
 
 # For development
 pip install llm-api-server[dev]
@@ -94,8 +106,11 @@ LLM API Server includes common tools that you can use out of the box:
 ### Using Built-in Tools
 
 ```python
-from llm_api_server import LLMServer, BUILTIN_TOOLS, get_current_date, calculate
+from llm_api_server import LLMServer, BUILTIN_TOOLS, ServerConfig
+from llm_api_server import get_current_date, calculate, create_web_search_tool
 from langchain_core.tools import tool
+
+config = ServerConfig.from_env("MYAPP_")
 
 # Option 1: Use all built-in tools
 server = LLMServer(
@@ -113,7 +128,16 @@ server = LLMServer(
     config=config
 )
 
-# Option 3: Combine built-in tools with custom tools
+# Option 3: Add web search tool (requires websearch extra)
+web_search = create_web_search_tool(config)  # Uses config.OLLAMA_API_KEY
+server = LLMServer(
+    name="MyApp",
+    model_name="myapp/assistant",
+    tools=BUILTIN_TOOLS + [web_search],
+    config=config
+)
+
+# Option 4: Combine built-in tools with custom tools
 @tool
 def get_weather(location: str) -> str:
     """Get weather for a location."""
@@ -133,6 +157,11 @@ server = LLMServer(
 - **`calculate(expression: str)`** - Safely evaluates mathematical expressions
   - Supports: `+`, `-`, `*`, `/`, `//`, `%`, `**` (power)
   - Example: `calculate("2 + 3 * 4")` → `"14"`
+- **`create_web_search_tool(config)`** - Web search with Ollama API and DuckDuckGo fallback
+  - Requires optional `websearch` dependency: `uv sync --extra websearch`
+  - Tries Ollama web search API first (if `OLLAMA_API_KEY` is set)
+  - Falls back to DuckDuckGo if API unavailable or rate-limited
+  - Parameters: `query`, `max_results` (default 10), `site` (optional filter)
 
 ## Configuration
 
@@ -164,6 +193,7 @@ With prefix `MYAPP_`:
 - `MYAPP_SYSTEM_PROMPT_PATH` - Path to system prompt file
 - `MYAPP_DEBUG_TOOLS` - Enable tool debug logging (true/false)
 - `OLLAMA_ENDPOINT` - Ollama API endpoint
+- `OLLAMA_API_KEY` - Ollama API key for web search (optional)
 - `LMSTUDIO_ENDPOINT` - LM Studio API endpoint
 
 ## API Endpoints
@@ -239,6 +269,12 @@ print(f"Success Rate: {summary['success_rate']:.1f}%")
 ### Features
 
 - **Flexible validation** - Expected keywords, response length, custom validators
+- **Beautiful HTML reports** - Markdown-formatted responses with syntax highlighting
+  - Full responses (no truncation)
+  - Collapsible long responses with expand/collapse buttons
+  - Code blocks with syntax highlighting
+  - Tables, lists, and blockquote formatting
+  - Requires optional `eval` extra: `uv sync --extra eval`
 - **Multiple report formats** - HTML, JSON, and console output
 - **Performance tracking** - Response times and success rates
 - **Custom validators** - Write domain-specific validation logic

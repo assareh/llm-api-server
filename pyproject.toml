@@ -33,6 +33,8 @@ dependencies = [
 
 [project.optional-dependencies]
 webui = ["open-webui"]
+websearch = ["duckduckgo-search>=5.0.0"]
+eval = ["markdown>=3.5.0"]
 dev = ["pytest", "pytest-mock", "black", "ruff", "mypy"]
 
 [project.urls]

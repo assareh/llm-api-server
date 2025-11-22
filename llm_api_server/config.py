@@ -1,6 +1,6 @@
 """Base configuration for LLM API Server."""
 
-from typing import Literal, Optional
+from typing import Literal
 
 
 class ServerConfig:
@@ -16,6 +16,9 @@ class ServerConfig:
     # Backend endpoints
     LMSTUDIO_ENDPOINT: str = "http://localhost:1234/v1"
     OLLAMA_ENDPOINT: str = "http://localhost:11434"
+
+    # Optional API keys
+    OLLAMA_API_KEY: str = ""  # For web search (optional)
 
     # Server configuration
     DEFAULT_HOST: str = "127.0.0.1"  # Default to localhost for security (use 0.0.0.0 for all interfaces)
@@ -50,7 +53,7 @@ class ServerConfig:
     BACKEND_RETRY_INITIAL_DELAY: float = 1.0  # Initial delay in seconds (doubles each retry)
 
     # Custom prompt suggestions for WebUI (list of dicts with title and content)
-    DEFAULT_PROMPT_SUGGESTIONS: Optional[list] = None
+    DEFAULT_PROMPT_SUGGESTIONS: list | None = None
 
     @classmethod
     def from_env(cls, env_prefix: str = ""):
@@ -83,6 +86,7 @@ class ServerConfig:
         config.BACKEND_MODEL = get_env("BACKEND_MODEL", cls.BACKEND_MODEL)
         config.LMSTUDIO_ENDPOINT = get_env("LMSTUDIO_ENDPOINT", cls.LMSTUDIO_ENDPOINT)
         config.OLLAMA_ENDPOINT = get_env("OLLAMA_ENDPOINT", cls.OLLAMA_ENDPOINT)
+        config.OLLAMA_API_KEY = get_env("OLLAMA_API_KEY", cls.OLLAMA_API_KEY)
         config.DEFAULT_HOST = get_env("HOST", cls.DEFAULT_HOST)
         config.DEFAULT_PORT = int(get_env("PORT", str(cls.DEFAULT_PORT)))
         config.DEFAULT_TEMPERATURE = float(get_env("TEMPERATURE", str(cls.DEFAULT_TEMPERATURE)))

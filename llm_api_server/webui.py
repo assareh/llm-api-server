@@ -5,7 +5,6 @@ import os
 import socket
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 
 def is_port_available(port: int) -> bool:
@@ -28,8 +27,8 @@ def find_available_port(starting_port: int, max_attempts: int = 10) -> int:
 
 
 def start_webui(
-    backend_port: int, model_name: str, config, prompt_suggestions: Optional[list] = None
-) -> Optional[subprocess.Popen]:
+    backend_port: int, model_name: str, config, prompt_suggestions: list | None = None
+) -> subprocess.Popen | None:
     """Start Open Web UI as a subprocess.
 
     Args:
