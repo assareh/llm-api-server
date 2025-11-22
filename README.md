@@ -8,6 +8,7 @@ A reusable Flask server providing an OpenAI-compatible API for local LLM backend
 - **Multiple backends** - Supports Ollama and LM Studio
 - **Tool calling** - Full support for function calling with LangChain tools
 - **Streaming responses** - Real-time token streaming
+- **Evaluation framework** - Test and validate LLM responses with HTML reports
 - **WebUI integration** - Optional Open Web UI frontend
 - **Smart caching** - System prompt auto-reload on file changes
 - **Debug logging** - Comprehensive tool execution logging
@@ -195,6 +196,61 @@ curl http://localhost:8000/v1/chat/completions \
     "messages": [{"role": "user", "content": "What is the weather in Paris?"}],
     "stream": false
   }'
+```
+
+## Evaluation Framework
+
+LLM API Server includes a comprehensive evaluation framework for testing your LLM applications.
+
+### Quick Example
+
+```python
+from llm_api_server.eval import Evaluator, TestCase, HTMLReporter
+
+# Define test cases
+tests = [
+    TestCase(
+        question="What is 2+2?",
+        description="Basic arithmetic test",
+        expected_keywords=["4", "four"],
+        min_response_length=10
+    ),
+    TestCase(
+        question="What are the best travel credit cards?",
+        description="Domain knowledge test",
+        expected_keywords=["chase", "sapphire", "travel"],
+        min_response_length=100
+    )
+]
+
+# Run evaluation
+evaluator = Evaluator(api_url="http://localhost:8000")
+results = evaluator.run_tests(tests)
+
+# Generate HTML report
+reporter = HTMLReporter()
+reporter.generate(results, "evaluation_report.html")
+
+# Print summary
+summary = evaluator.get_summary(results)
+print(f"Success Rate: {summary['success_rate']:.1f}%")
+```
+
+### Features
+
+- **Flexible validation** - Expected keywords, response length, custom validators
+- **Multiple report formats** - HTML, JSON, and console output
+- **Performance tracking** - Response times and success rates
+- **Custom validators** - Write domain-specific validation logic
+- **CI/CD ready** - JSON reports and exit codes for automation
+
+### Documentation
+
+See [`llm_api_server/eval/README.md`](llm_api_server/eval/README.md) for complete documentation and examples.
+
+Run the example script:
+```bash
+python example_evaluation.py
 ```
 
 ## Advanced Usage

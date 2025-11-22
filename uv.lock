@@ -2527,6 +2527,7 @@ dev = [
     { name = "black" },
     { name = "mypy" },
     { name = "pytest" },
+    { name = "pytest-mock" },
     { name = "ruff" },
 ]
 webui = [
@@ -2543,6 +2544,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "open-webui", marker = "extra == 'webui'" },
     { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pytest-mock", marker = "extra == 'dev'" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "ruff", marker = "extra == 'dev'" },
@@ -4716,6 +4718,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/2e/60/a081b0243a6f743f008d7b5ae6d9026bf2d7df6179c3e331d1ef22df6c81/pytest_docker-3.1.2.tar.gz", hash = "sha256:46e2d14796846ce8bc52857999f4b8e71ad294f5475d5470b03e08f790b040e2", size = 13401, upload-time = "2025-02-04T21:17:01.299Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/91/e1/54aa4da0860aed659437453edadbd1785d9834a3702aa3c791d61ccb62c0/pytest_docker-3.1.2-py3-none-any.whl", hash = "sha256:755246726d307b6295d23bd184eb647d5bceaf1196d8e2f74914391e22078ee6", size = 8493, upload-time = "2025-02-04T21:17:00.134Z" },
+]
+
+[[package]]
+name = "pytest-mock"
+version = "3.15.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/68/14/eb014d26be205d38ad5ad20d9a80f7d201472e08167f0bb4361e251084a9/pytest_mock-3.15.1.tar.gz", hash = "sha256:1849a238f6f396da19762269de72cb1814ab44416fa73a8686deac10b0d87a0f", size = 34036, upload-time = "2025-09-16T16:37:27.081Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/cc/06253936f4a7fa2e0f48dfe6d851d9c56df896a9ab09ac019d70b760619c/pytest_mock-3.15.1-py3-none-any.whl", hash = "sha256:0a25e2eb88fe5168d535041d09a4529a188176ae608a6d249ee65abc0949630d", size = 10095, upload-time = "2025-09-16T16:37:25.734Z" },
 ]
 
 [[package]]

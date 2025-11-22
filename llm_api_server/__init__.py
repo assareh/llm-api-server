@@ -8,7 +8,10 @@ from .builtin_tools import (
 from .config import ServerConfig
 from .server import LLMServer
 
-__version__ = "0.1.0"
+# Eval module is available but not imported by default to avoid dependency bloat
+# Users can import with: from llm_api_server.eval import Evaluator, TestCase, etc.
+
+__version__ = "0.2.0"
 __all__ = [
     "BUILTIN_TOOLS",
     "LLMServer",
