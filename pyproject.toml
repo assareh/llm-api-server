@@ -34,7 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 webui = ["open-webui"]
-dev = ["pytest", "black", "ruff", "mypy"]
+dev = ["pytest", "pytest-mock", "black", "ruff", "mypy"]
 
 [project.urls]
 Homepage = "https://github.com/assareh/llm-api-server"
@@ -123,4 +123,21 @@ exclude = [
     ".venv/",
     "build/",
     "dist/",
+]
+
+[tool.pytest.ini_options]
+# Pytest configuration
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",                    # Verbose output
+    "--strict-markers",      # Raise error on unknown markers
+    "--tb=short",            # Shorter traceback format
+    "--disable-warnings",    # Disable warnings in output
+]
+markers = [
+    "unit: Unit tests (fast, no external dependencies)",
+    "integration: Integration tests (may require backends)",
 ]
