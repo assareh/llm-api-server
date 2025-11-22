@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+import traceback
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional
@@ -147,16 +148,26 @@ class LLMServer:
 
                     return result_str
                 except Exception as e:
-                    error_msg = f"Error executing tool {tool_name}: {e!s}"
+                    error_msg = f"Error executing tool '{tool_name}': {type(e).__name__}: {e!s}"
+
+                    # Enhanced error logging with full traceback in debug mode
                     if self.config.DEBUG_TOOLS:
                         self.logger.error(f"ERROR: {error_msg}")
+                        self.logger.error(f"Tool input: {json.dumps(tool_input, indent=2)}")
+                        self.logger.error(f"Full traceback:\n{traceback.format_exc()}")
                         self.logger.debug("=" * 80 + "\n")
-                    return error_msg
 
-        not_found_msg = f"Tool {tool_name} not found"
+                    # Return user-friendly error message
+                    return f"{error_msg}\n\nTip: Enable DEBUG_TOOLS for detailed error logs."
+
+        # Tool not found
+        available_tools = [t.name for t in self.tools]
+        not_found_msg = f"Tool '{tool_name}' not found. Available tools: {', '.join(available_tools)}"
+
         if self.config.DEBUG_TOOLS:
             self.logger.error(f"ERROR: {not_found_msg}")
             self.logger.debug("=" * 80 + "\n")
+
         return not_found_msg
 
     def call_backend(self, messages: List[Dict], temperature: float, stream: bool = False):
@@ -199,6 +210,20 @@ class LLMServer:
                 response = self.call_backend(full_messages, temperature, stream=False)
                 response_data = response.json()
             except requests.Timeout:
+                backend_endpoint = (
+                    self.config.LMSTUDIO_ENDPOINT if self.config.BACKEND_TYPE == "lmstudio" else self.config.OLLAMA_ENDPOINT
+                )
+                error_content = (
+                    f"Backend request timed out after {self.config.BACKEND_READ_TIMEOUT}s.\n\n"
+                    f"Backend: {self.config.BACKEND_TYPE}\n"
+                    f"Endpoint: {backend_endpoint}\n"
+                    f"Model: {self.config.BACKEND_MODEL}\n\n"
+                    f"Troubleshooting:\n"
+                    f"• The model may be overloaded or generating a very long response\n"
+                    f"• Increase timeout: Set BACKEND_READ_TIMEOUT={self.config.BACKEND_READ_TIMEOUT * 2}\n"
+                    f"• Check backend logs for errors\n"
+                    f"• Try a smaller/faster model"
+                )
                 return {
                     "id": f"chatcmpl-{int(time.time())}",
                     "object": "chat.completion",
@@ -207,16 +232,28 @@ class LLMServer:
                     "choices": [
                         {
                             "index": 0,
-                            "message": {
-                                "role": "assistant",
-                                "content": f"Error: Backend request timed out after {self.config.BACKEND_READ_TIMEOUT}s. The model may be overloaded or unresponsive.",
-                            },
+                            "message": {"role": "assistant", "content": error_content},
                             "finish_reason": "error",
                         }
                     ],
                     "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
                 }
-            except requests.ConnectionError:
+            except requests.ConnectionError as e:
+                backend_endpoint = (
+                    self.config.LMSTUDIO_ENDPOINT if self.config.BACKEND_TYPE == "lmstudio" else self.config.OLLAMA_ENDPOINT
+                )
+                error_content = (
+                    f"Could not connect to {self.config.BACKEND_TYPE} backend.\n\n"
+                    f"Backend: {self.config.BACKEND_TYPE}\n"
+                    f"Endpoint: {backend_endpoint}\n"
+                    f"Model: {self.config.BACKEND_MODEL}\n"
+                    f"Error: {type(e).__name__}: {e!s}\n\n"
+                    f"Troubleshooting:\n"
+                    f"• Ensure {self.config.BACKEND_TYPE} is running\n"
+                    f"• Verify endpoint URL is correct\n"
+                    f"• Check if model is loaded in backend\n"
+                    f"• Test connection: curl {backend_endpoint}/models"
+                )
                 return {
                     "id": f"chatcmpl-{int(time.time())}",
                     "object": "chat.completion",
@@ -225,10 +262,7 @@ class LLMServer:
                     "choices": [
                         {
                             "index": 0,
-                            "message": {
-                                "role": "assistant",
-                                "content": f"Error: Could not connect to {self.config.BACKEND_TYPE} backend at {self.config.LMSTUDIO_ENDPOINT if self.config.BACKEND_TYPE == 'lmstudio' else self.config.OLLAMA_ENDPOINT}. Please ensure the backend is running.",
-                            },
+                            "message": {"role": "assistant", "content": error_content},
                             "finish_reason": "error",
                         }
                     ],
@@ -313,39 +347,41 @@ class LLMServer:
                 response = self.call_backend(full_messages, temperature, stream=False)
                 response_data = response.json()
             except requests.Timeout:
+                backend_endpoint = (
+                    self.config.LMSTUDIO_ENDPOINT if self.config.BACKEND_TYPE == "lmstudio" else self.config.OLLAMA_ENDPOINT
+                )
+                error_content = (
+                    f"Backend request timed out after {self.config.BACKEND_READ_TIMEOUT}s.\n\n"
+                    f"Backend: {self.config.BACKEND_TYPE} at {backend_endpoint}\n"
+                    f"Model: {self.config.BACKEND_MODEL}\n\n"
+                    f"Try: Increase BACKEND_READ_TIMEOUT or use a faster model"
+                )
                 error_chunk = {
                     "id": f"chatcmpl-{int(time.time())}",
                     "object": "chat.completion.chunk",
                     "created": int(time.time()),
                     "model": self.model_name,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {
-                                "content": f"Error: Backend request timed out after {self.config.BACKEND_READ_TIMEOUT}s. The model may be overloaded or unresponsive."
-                            },
-                            "finish_reason": "error",
-                        }
-                    ],
+                    "choices": [{"index": 0, "delta": {"content": error_content}, "finish_reason": "error"}],
                 }
                 yield f"data: {json.dumps(error_chunk)}\n\n"
                 yield "data: [DONE]\n\n"
                 return
-            except requests.ConnectionError:
+            except requests.ConnectionError as e:
+                backend_endpoint = (
+                    self.config.LMSTUDIO_ENDPOINT if self.config.BACKEND_TYPE == "lmstudio" else self.config.OLLAMA_ENDPOINT
+                )
+                error_content = (
+                    f"Could not connect to {self.config.BACKEND_TYPE} backend.\n\n"
+                    f"Endpoint: {backend_endpoint}\n"
+                    f"Error: {type(e).__name__}\n\n"
+                    f"Ensure {self.config.BACKEND_TYPE} is running and accessible"
+                )
                 error_chunk = {
                     "id": f"chatcmpl-{int(time.time())}",
                     "object": "chat.completion.chunk",
                     "created": int(time.time()),
                     "model": self.model_name,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {
-                                "content": f"Error: Could not connect to {self.config.BACKEND_TYPE} backend. Please ensure it is running."
-                            },
-                            "finish_reason": "error",
-                        }
-                    ],
+                    "choices": [{"index": 0, "delta": {"content": error_content}, "finish_reason": "error"}],
                 }
                 yield f"data: {json.dumps(error_chunk)}\n\n"
                 yield "data: [DONE]\n\n"
@@ -486,7 +522,18 @@ class LLMServer:
                 return jsonify(result)
 
         except Exception as e:
-            return jsonify({"error": str(e)}), 500
+            error_details = {
+                "error": f"{type(e).__name__}: {str(e)}",
+                "type": type(e).__name__,
+                "endpoint": "/v1/chat/completions",
+            }
+
+            # Add traceback in debug mode
+            if self.config.DEBUG_TOOLS:
+                error_details["traceback"] = traceback.format_exc()
+                self.logger.error(f"Unhandled exception in chat_completions:\n{traceback.format_exc()}")
+
+            return jsonify(error_details), 500
 
     def run(
         self,
