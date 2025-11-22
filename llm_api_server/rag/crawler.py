@@ -72,13 +72,16 @@ class DocumentCrawler:
 
         # Robots.txt parser
         self.robot_parser = RobotFileParser()
+        self.robots_loaded = False  # Track if robots.txt loaded successfully
         robots_url = urljoin(self.base_url, "/robots.txt")
         self.robot_parser.set_url(robots_url)
         try:
             self.robot_parser.read()
+            self.robots_loaded = True
             logger.info(f"[CRAWLER] Loaded robots.txt from {robots_url}")
         except Exception as e:
-            logger.warning(f"[CRAWLER] Failed to load robots.txt: {e}")
+            logger.warning(f"[CRAWLER] Failed to load robots.txt from {robots_url}: {e}")
+            logger.info("[CRAWLER] Proceeding without robots.txt restrictions")
 
     def discover_and_crawl(self) -> list[dict[str, Any]]:
         """Discover URLs using sitemap or recursive crawl, plus manual URLs.
@@ -286,10 +289,13 @@ class DocumentCrawler:
             Tuple of (url, html_content) or None if failed
         """
         try:
-            # Check robots.txt
-            if not self.robot_parser.can_fetch(self.user_agent, url):
-                logger.warning(f"[CRAWLER] robots.txt disallows: {url}")
-                return None
+            # Check robots.txt only if it loaded successfully
+            if self.robots_loaded:
+                if not self.robot_parser.can_fetch(self.user_agent, url):
+                    logger.warning(f"[CRAWLER] robots.txt disallows: {url}")
+                    return None
+            else:
+                logger.debug(f"[CRAWLER] Skipping robots.txt check (not loaded) for: {url}")
 
             logger.debug(f"[CRAWLER] Fetching: {url}")
             response = requests.get(url, headers={"User-Agent": self.user_agent}, timeout=30)
