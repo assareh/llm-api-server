@@ -42,6 +42,10 @@ class ServerConfig:
     HEALTH_CHECK_ON_STARTUP: bool = True  # Check backend availability before starting server
     HEALTH_CHECK_TIMEOUT: int = 5  # Timeout for health check requests (in seconds)
 
+    # Retry settings for backend calls
+    BACKEND_RETRY_ATTEMPTS: int = 3  # Number of retry attempts for connection errors
+    BACKEND_RETRY_INITIAL_DELAY: float = 1.0  # Initial delay in seconds (doubles each retry)
+
     # Custom prompt suggestions for WebUI (list of dicts with title and content)
     DEFAULT_PROMPT_SUGGESTIONS: Optional[list] = None
 
@@ -87,5 +91,9 @@ class ServerConfig:
         config.BACKEND_READ_TIMEOUT = int(get_env("BACKEND_READ_TIMEOUT", str(cls.BACKEND_READ_TIMEOUT)))
         config.HEALTH_CHECK_ON_STARTUP = get_env("HEALTH_CHECK_ON_STARTUP", "").lower() not in ("false", "0", "no")
         config.HEALTH_CHECK_TIMEOUT = int(get_env("HEALTH_CHECK_TIMEOUT", str(cls.HEALTH_CHECK_TIMEOUT)))
+        config.BACKEND_RETRY_ATTEMPTS = int(get_env("BACKEND_RETRY_ATTEMPTS", str(cls.BACKEND_RETRY_ATTEMPTS)))
+        config.BACKEND_RETRY_INITIAL_DELAY = float(
+            get_env("BACKEND_RETRY_INITIAL_DELAY", str(cls.BACKEND_RETRY_INITIAL_DELAY))
+        )
 
         return config
