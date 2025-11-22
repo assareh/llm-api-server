@@ -479,16 +479,17 @@ class LLMServer:
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
-    def run(self, port: Optional[int] = None, host: str = "0.0.0.0", debug: bool = False, start_webui: bool = True):
+    def run(self, port: Optional[int] = None, host: Optional[str] = None, debug: bool = False, start_webui: bool = True):
         """Run the Flask server.
 
         Args:
             port: Port to run on (defaults to config.DEFAULT_PORT)
-            host: Host to bind to (default: 0.0.0.0)
+            host: Host to bind to (defaults to config.DEFAULT_HOST, which is 127.0.0.1 for security)
             debug: Enable debug mode
             start_webui: Whether to start Open Web UI
         """
         port = port or self.config.DEFAULT_PORT
+        host = host or self.config.DEFAULT_HOST
 
         print(
             f"""
@@ -498,10 +499,17 @@ class LLMServer:
 
 Backend: {self.config.BACKEND_TYPE}
 Model: {self.config.BACKEND_MODEL}
+Host: {host}
 Port: {port}
 API: http://localhost:{port}/v1
 """
         )
+
+        # Security warning if binding to all interfaces
+        if host == "0.0.0.0":
+            print("⚠️  WARNING: Server is binding to 0.0.0.0 (all network interfaces)")
+            print("   This exposes the API to your entire network without authentication.")
+            print("   For security, use HOST=127.0.0.1 (localhost only) unless you need network access.\n")
 
         # Check backend health if enabled
         if self.config.HEALTH_CHECK_ON_STARTUP:

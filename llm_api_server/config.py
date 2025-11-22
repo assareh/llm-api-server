@@ -18,6 +18,7 @@ class ServerConfig:
     OLLAMA_ENDPOINT: str = "http://localhost:11434"
 
     # Server configuration
+    DEFAULT_HOST: str = "127.0.0.1"  # Default to localhost for security (use 0.0.0.0 for all interfaces)
     DEFAULT_PORT: int = 8000
     DEFAULT_TEMPERATURE: float = 0.0
     SYSTEM_PROMPT_PATH: str = "system_prompt.md"
@@ -75,6 +76,7 @@ class ServerConfig:
         config.BACKEND_MODEL = get_env("BACKEND_MODEL", cls.BACKEND_MODEL)
         config.LMSTUDIO_ENDPOINT = get_env("LMSTUDIO_ENDPOINT", cls.LMSTUDIO_ENDPOINT)
         config.OLLAMA_ENDPOINT = get_env("OLLAMA_ENDPOINT", cls.OLLAMA_ENDPOINT)
+        config.DEFAULT_HOST = get_env("HOST", cls.DEFAULT_HOST)
         config.DEFAULT_PORT = int(get_env("PORT", str(cls.DEFAULT_PORT)))
         config.DEFAULT_TEMPERATURE = float(get_env("TEMPERATURE", str(cls.DEFAULT_TEMPERATURE)))
         config.SYSTEM_PROMPT_PATH = get_env("SYSTEM_PROMPT_PATH", cls.SYSTEM_PROMPT_PATH)
