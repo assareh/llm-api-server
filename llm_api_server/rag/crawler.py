@@ -70,15 +70,37 @@ class DocumentCrawler:
         self.url_include_patterns = [re.compile(p) for p in (url_include_patterns or [])]
         self.url_exclude_patterns = [re.compile(p) for p in (url_exclude_patterns or [])]
 
-        # Robots.txt parser
+        # Robots.txt parser and sitemap discovery
         self.robot_parser = RobotFileParser()
         self.robots_loaded = False  # Track if robots.txt loaded successfully
+        self.sitemap_urls_from_robots = []  # Sitemap URLs found in robots.txt
+
         robots_url = urljoin(self.base_url, "/robots.txt")
         self.robot_parser.set_url(robots_url)
         try:
-            self.robot_parser.read()
+            # Fetch robots.txt to parse both rules and sitemap URLs
+            response = requests.get(robots_url, headers={"User-Agent": user_agent}, timeout=30)
+            response.raise_for_status()
+
+            # Parse sitemap URLs from robots.txt
+            for line in response.text.splitlines():
+                line = line.strip()
+                if line.lower().startswith("sitemap:"):
+                    sitemap_url = line.split(":", 1)[1].strip()
+                    self.sitemap_urls_from_robots.append(sitemap_url)
+
+            # Also load into robot parser for can_fetch checks
+            # Note: We can't use read() after fetching manually, so we parse the content
+
+            self.robot_parser.parse(response.text.splitlines())
             self.robots_loaded = True
-            logger.info(f"[CRAWLER] Loaded robots.txt from {robots_url}")
+
+            if self.sitemap_urls_from_robots:
+                logger.info(
+                    f"[CRAWLER] Loaded robots.txt from {robots_url}, found {len(self.sitemap_urls_from_robots)} sitemap(s)"
+                )
+            else:
+                logger.info(f"[CRAWLER] Loaded robots.txt from {robots_url} (no sitemaps listed)")
         except Exception as e:
             logger.warning(f"[CRAWLER] Failed to load robots.txt from {robots_url}: {e}")
             logger.info("[CRAWLER] Proceeding without robots.txt restrictions")
@@ -128,15 +150,22 @@ class DocumentCrawler:
     def _discover_sitemap(self) -> list[dict[str, Any]]:
         """Try to discover and parse sitemap.xml.
 
+        First tries sitemap URLs from robots.txt, then falls back to common locations.
+
         Returns:
             List of URL info dicts from sitemap, or empty list if not found
         """
-        # Common sitemap locations
-        sitemap_urls = [
-            f"{self.base_url}/sitemap.xml",
-            f"{self.base_url}/sitemap_index.xml",
-            f"{self.base_url}/server-sitemap.xml",
-        ]
+        # Try sitemap URLs from robots.txt first
+        sitemap_urls = list(self.sitemap_urls_from_robots)  # Copy list
+
+        # Add common sitemap locations as fallbacks
+        sitemap_urls.extend(
+            [
+                f"{self.base_url}/sitemap.xml",
+                f"{self.base_url}/sitemap_index.xml",
+                f"{self.base_url}/server-sitemap.xml",
+            ]
+        )
 
         for sitemap_url in sitemap_urls:
             try:
@@ -205,6 +234,9 @@ class DocumentCrawler:
                         continue
 
                     urls.append({"url": url, "lastmod": lastmod.text if lastmod is not None else None})
+
+            # Sort by lastmod (newest first) - URLs without lastmod go to the end
+            urls.sort(key=lambda x: x.get("lastmod") or "", reverse=True)
 
             return urls
 
