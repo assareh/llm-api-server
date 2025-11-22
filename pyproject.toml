@@ -35,6 +35,17 @@ dependencies = [
 webui = ["open-webui"]
 websearch = ["duckduckgo-search>=5.0.0"]
 eval = ["markdown>=3.5.0"]
+rag = [
+    "langchain>=0.3.0",
+    "langchain-community>=0.0.13",
+    "langchain-huggingface>=0.3.0",
+    "langchain-text-splitters>=0.3.0",
+    "faiss-cpu>=1.8.0",
+    "sentence-transformers>=2.3.0",
+    "beautifulsoup4>=4.12.0",
+    "tiktoken>=0.5.0",
+    "rank-bm25>=0.2.2",
+]
 dev = ["pytest", "pytest-mock", "black", "ruff", "mypy"]
 
 [project.urls]

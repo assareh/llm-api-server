@@ -9,8 +9,9 @@ from .builtin_tools import (
 from .config import ServerConfig
 from .server import LLMServer
 
-# Eval module is available but not imported by default to avoid dependency bloat
-# Users can import with: from llm_api_server.eval import Evaluator, TestCase, etc.
+# Optional modules available but not imported by default to avoid dependency bloat:
+# - Eval module: from llm_api_server.eval import Evaluator, TestCase, etc.
+# - RAG module: from llm_api_server.rag import DocSearchIndex, RAGConfig
 
 __version__ = "0.3.0"
 __all__ = [

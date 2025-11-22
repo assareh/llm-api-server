@@ -1,0 +1,96 @@
+"""RAG configuration dataclass."""
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+@dataclass
+class RAGConfig:
+    """Configuration for RAG document indexing and search.
+
+    Attributes:
+        base_url: Starting URL for crawling (e.g., "https://docs.example.com")
+        cache_dir: Directory to store index, embeddings, and cached content
+        manual_urls: Optional list of specific URLs to index
+        manual_urls_only: If True, only index manual_urls (no crawling). If False, manual_urls are additive.
+
+        # Crawling settings
+        max_crawl_depth: Maximum depth for recursive crawler (default: 3)
+        rate_limit_delay: Seconds between HTTP requests (default: 0.1)
+        max_workers: Number of parallel fetching threads (default: 5)
+        max_pages: Maximum total pages to crawl (None = unlimited, useful for testing)
+        url_include_patterns: List of regex patterns - only crawl matching URLs
+        url_exclude_patterns: List of regex patterns - skip matching URLs
+
+        # Chunking settings
+        child_chunk_size: Target tokens per child chunk (default: 350)
+        child_chunk_overlap: Overlap tokens between child chunks (default: 50)
+        parent_chunk_size: Target tokens per parent chunk (default: 900)
+        parent_chunk_overlap: Overlap tokens between parent chunks (default: 100)
+
+        # Search settings
+        hybrid_bm25_weight: Weight for BM25 keyword search (default: 0.3)
+        hybrid_semantic_weight: Weight for semantic vector search (default: 0.7)
+        search_top_k: Default number of results to return (default: 5)
+        rerank_enabled: Enable cross-encoder re-ranking (default: True)
+        rerank_top_k: Number of candidates for final re-ranking (default: 80)
+
+        # Model settings
+        embedding_model: HuggingFace embedding model name
+        rerank_model: Cross-encoder model for final re-ranking
+        light_rerank_model: Lightweight cross-encoder for first-pass re-ranking
+
+        # Index settings
+        update_check_interval_hours: Hours between index update checks (default: 168 = 7 days)
+    """
+
+    # Core settings
+    base_url: str
+    cache_dir: str | Path = "./rag_cache"
+    manual_urls: list[str] | None = None
+    manual_urls_only: bool = False
+
+    # Crawling settings
+    max_crawl_depth: int = 3
+    rate_limit_delay: float = 0.1
+    max_workers: int = 5
+    max_pages: int | None = None
+    url_include_patterns: list[str] = field(default_factory=list)
+    url_exclude_patterns: list[str] = field(default_factory=list)
+
+    # Chunking settings
+    child_chunk_size: int = 350
+    child_chunk_overlap: int = 50
+    parent_chunk_size: int = 900
+    parent_chunk_overlap: int = 100
+
+    # Search settings
+    hybrid_bm25_weight: float = 0.3
+    hybrid_semantic_weight: float = 0.7
+    search_top_k: int = 5
+    rerank_enabled: bool = True
+    rerank_top_k: int = 80
+
+    # Model settings
+    embedding_model: str = "all-MiniLM-L6-v2"
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-12-v2"
+    light_rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    # Index settings
+    update_check_interval_hours: int = 168  # 7 days
+
+    def __post_init__(self):
+        """Convert cache_dir to Path and validate weights."""
+        self.cache_dir = Path(self.cache_dir)
+
+        # Validate hybrid search weights
+        total_weight = self.hybrid_bm25_weight + self.hybrid_semantic_weight
+        if abs(total_weight - 1.0) > 0.01:  # Allow small floating point error
+            raise ValueError(
+                f"Hybrid search weights must sum to 1.0, got {total_weight} "
+                f"(bm25={self.hybrid_bm25_weight}, semantic={self.hybrid_semantic_weight})"
+            )
+
+        # Ensure manual_urls is a list if provided
+        if self.manual_urls is None:
+            self.manual_urls = []

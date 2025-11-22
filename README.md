@@ -8,6 +8,7 @@ A reusable Flask server providing an OpenAI-compatible API for local LLM backend
 - **Multiple backends** - Supports Ollama and LM Studio
 - **Tool calling** - Full support for function calling with LangChain tools
 - **Streaming responses** - Real-time token streaming
+- **RAG module** - Local documentation search with hybrid retrieval, semantic chunking, and re-ranking
 - **Evaluation framework** - Test and validate LLM responses with beautiful HTML reports
   - Full markdown-formatted responses (no truncation)
   - Collapsible long responses with syntax highlighting
@@ -30,6 +31,7 @@ uv sync
 # With optional dependencies
 uv sync --extra webui      # For Open Web UI support
 uv sync --extra websearch  # For web search tool
+uv sync --extra rag        # For RAG document search module
 uv sync --extra eval       # For HTML reports with markdown formatting
 uv sync --extra dev        # For development tools
 uv sync --all-extras       # Install everything
@@ -57,6 +59,9 @@ pip install llm-api-server[webui]
 
 # For web search tool
 pip install llm-api-server[websearch]
+
+# For RAG document search module
+pip install llm-api-server[rag]
 
 # For HTML reports with markdown formatting
 pip install llm-api-server[eval]
@@ -162,6 +167,139 @@ server = LLMServer(
   - Tries Ollama web search API first (if `OLLAMA_API_KEY` is set)
   - Falls back to DuckDuckGo if API unavailable or rate-limited
   - Parameters: `query`, `max_results` (default 10), `site` (optional filter)
+
+## RAG Module (Document Search)
+
+LLM API Server includes a powerful RAG (Retrieval-Augmented Generation) module for building local documentation search systems.
+
+### Installation
+
+```bash
+# Install with RAG dependencies
+uv sync --extra rag
+```
+
+### Features
+
+- **Three crawling modes:**
+  - Sitemap-based (discovers sitemap.xml automatically)
+  - Recursive web crawling (follows links)
+  - Manual URL list (explicit control)
+- **Semantic HTML chunking** - Respects document structure (headings, code blocks, tables)
+- **Parent-child chunks** - Hierarchical context for better retrieval
+- **Hybrid search** - Combines BM25 keyword search + semantic vector search
+- **Cross-encoder re-ranking** - Two-stage re-ranking for improved relevance
+- **Incremental updates** - Only re-indexes changed content
+- **Local-first** - Everything runs locally (FAISS, HuggingFace embeddings)
+
+### Quick Start
+
+```python
+from llm_api_server.rag import DocSearchIndex, RAGConfig
+
+# Configure RAG
+config = RAGConfig(
+    base_url="https://docs.example.com",
+    cache_dir="./doc_index",
+    # Optional: manual URLs (additive or exclusive)
+    manual_urls=["https://docs.example.com/important-page"],
+    manual_urls_only=False,  # False = add to crawled URLs, True = only index these
+)
+
+# Build index (first time)
+index = DocSearchIndex(config)
+index.crawl_and_index()
+
+# Search
+results = index.search("How do I configure authentication?", top_k=5)
+
+for result in results:
+    print(f"Score: {result['score']:.3f}")
+    print(f"URL: {result['url']}")
+    print(f"Section: {result['heading_path']}")
+    print(f"Text: {result['text'][:200]}...")
+    if 'parent_text' in result:
+        print(f"Parent context: {result['parent_text'][:200]}...")
+    print()
+```
+
+### Configuration Options
+
+```python
+config = RAGConfig(
+    base_url="https://docs.example.com",
+    cache_dir="./doc_index",
+
+    # Crawling settings
+    manual_urls=["https://..."],           # Optional list of specific URLs
+    manual_urls_only=False,                # True = only index manual URLs
+    max_crawl_depth=3,                     # Maximum recursion depth
+    rate_limit_delay=0.1,                  # Seconds between requests
+    max_pages=None,                        # Limit total pages (None = unlimited)
+    url_include_patterns=["docs/.*"],      # Regex patterns to include
+    url_exclude_patterns=[".*/api/.*"],    # Regex patterns to exclude
+
+    # Chunking settings
+    child_chunk_size=350,                  # Tokens per child chunk
+    parent_chunk_size=900,                 # Tokens per parent chunk
+
+    # Search settings
+    hybrid_bm25_weight=0.3,                # BM25 keyword search weight
+    hybrid_semantic_weight=0.7,            # Semantic vector search weight
+    search_top_k=5,                        # Default results to return
+    rerank_enabled=True,                   # Enable cross-encoder re-ranking
+    rerank_top_k=80,                       # Candidates for re-ranking
+
+    # Model settings
+    embedding_model="all-MiniLM-L6-v2",    # HuggingFace model (~80MB)
+
+    # Index settings
+    update_check_interval_hours=168,       # Check for updates (7 days)
+)
+```
+
+### Crawling Modes
+
+The RAG module automatically selects the best crawling strategy:
+
+1. **Default behavior:** Tries to discover `sitemap.xml` → uses if found
+2. **Fallback:** If no sitemap → recursive crawling from base_url
+3. **Manual mode:** `manual_urls_only=True` → only index specified URLs
+
+### Incremental Updates
+
+```python
+# Check if update needed
+if index.needs_update():
+    print("Index is stale, rebuilding...")
+    index.crawl_and_index()
+else:
+    print("Index is up-to-date")
+    index.load_index()
+
+# Force rebuild
+index.crawl_and_index(force_rebuild=True)
+```
+
+### Advanced: Hybrid Search Weights
+
+Adjust the balance between keyword and semantic search:
+
+```python
+# More keyword-focused (good for technical docs with specific terms)
+config = RAGConfig(
+    base_url="https://docs.example.com",
+    hybrid_bm25_weight=0.5,      # 50% keyword
+    hybrid_semantic_weight=0.5,  # 50% semantic
+)
+
+# More semantic-focused (good for concept-based queries)
+config = RAGConfig(
+    base_url="https://docs.example.com",
+    hybrid_bm25_weight=0.2,      # 20% keyword
+    hybrid_semantic_weight=0.8,  # 80% semantic
+)
+```
 
 ## Configuration
 

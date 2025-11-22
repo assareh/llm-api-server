@@ -68,7 +68,17 @@ llm-api-server/
 │   ├── config.py           # ServerConfig base class
 │   ├── builtin_tools.py    # Built-in tools (date, calculate, web search)
 │   ├── web_search_tool.py  # Web search implementation (Ollama + DuckDuckGo)
-│   └── webui.py            # Open Web UI integration
+│   ├── webui.py            # Open Web UI integration
+│   ├── eval/               # Evaluation framework module
+│   │   ├── evaluator.py    # Test execution engine
+│   │   ├── reporters.py    # HTML/JSON/Console reporters
+│   │   └── ...
+│   └── rag/                # RAG document search module
+│       ├── config.py       # RAGConfig dataclass
+│       ├── crawler.py      # Web crawling (sitemap + recursive + manual)
+│       ├── chunker.py      # Semantic HTML chunking
+│       ├── indexer.py      # Main DocSearchIndex class
+│       └── __init__.py     # Module exports
 ├── setup.py                # Package installation
 ├── pyproject.toml          # Packaging & linting config
 └── README.md               # Package documentation
@@ -118,6 +128,7 @@ uv sync                   # Install core dependencies
 uv sync --extra dev       # With development tools
 uv sync --extra webui     # With Open Web UI
 uv sync --extra websearch # With web search tool
+uv sync --extra rag       # With RAG document search module
 uv sync --extra eval      # With HTML report markdown formatting
 uv sync --all-extras      # Everything
 
@@ -233,6 +244,68 @@ The framework includes a comprehensive evaluation system in `llm_api_server/eval
 - `validators.py` - Response validation logic
 
 See `llm_api_server/eval/README.md` for complete documentation.
+
+### RAG Module (Document Search)
+
+The framework includes a comprehensive RAG system in `llm_api_server/rag/`:
+
+**Components:**
+- `DocSearchIndex` - Main indexer with crawling, chunking, embedding, and search
+- `RAGConfig` - Configuration dataclass with all settings
+- `DocumentCrawler` - Web crawler (sitemap + recursive + manual URLs)
+- `semantic_chunk_html()` - HTML-aware chunking with parent-child relationships
+
+**Features:**
+- **Three crawling modes**: Sitemap (auto-discover) → Recursive (fallback) → Manual (explicit)
+- **Semantic HTML chunking** - Respects document structure (headings, code, tables)
+- **Parent-child chunks** - Hierarchical relationships for context
+- **Hybrid search** - BM25 keyword + semantic vector search (configurable weights)
+- **Two-stage re-ranking** - Light cross-encoder → heavy cross-encoder
+- **Incremental updates** - Check timestamps, only rebuild if stale
+- **Local-first** - FAISS vector store, HuggingFace embeddings (all-MiniLM-L6-v2)
+
+**Architecture:**
+1. **Crawler** discovers URLs (sitemap XML parsing, recursive link following, or manual list)
+2. **Chunker** processes HTML into parent-child chunks using heading hierarchy
+3. **Indexer** generates embeddings and builds FAISS + BM25 indexes
+4. **Searcher** uses ensemble retriever (hybrid) + cross-encoder re-ranking
+
+**Key files:**
+- `config.py` - RAGConfig with all crawling/chunking/search settings
+- `crawler.py` - DocumentCrawler class, robots.txt support, URL filtering
+- `chunker.py` - semantic_chunk_html(), token-aware chunking with tiktoken
+- `indexer.py` - DocSearchIndex main class
+
+**Usage:**
+```python
+from llm_api_server.rag import DocSearchIndex, RAGConfig
+
+config = RAGConfig(
+    base_url="https://docs.example.com",
+    cache_dir="./doc_index",
+    hybrid_bm25_weight=0.3,       # 30% keyword, 70% semantic
+    hybrid_semantic_weight=0.7,
+)
+
+index = DocSearchIndex(config)
+index.crawl_and_index()
+results = index.search("query", top_k=5)
+```
+
+**Ported from Ivan:**
+This module was generalized from Ivan's HashiCorp doc search implementation:
+- Removed HashiCorp-specific logic (product extraction, domain-specific synonyms)
+- Made crawling more general (works with any doc site)
+- Kept all advanced features (parent-child chunking, hybrid search, re-ranking)
+- Added configurable crawling modes (sitemap + recursive + manual)
+
+**Dependencies (optional `--extra rag`):**
+- langchain, langchain-community, langchain-huggingface
+- faiss-cpu (vector store)
+- sentence-transformers (cross-encoder re-ranking)
+- beautifulsoup4 (HTML parsing)
+- tiktoken (token counting)
+- rank-bm25 (keyword search)
 
 ## Consuming Projects
 
