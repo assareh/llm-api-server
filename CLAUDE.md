@@ -45,7 +45,7 @@ This script:
 ### Configuration
 
 All linting settings in `pyproject.toml`:
-- **Black**: 120 character lines, Python 3.8-3.12 support
+- **Black**: 120 character lines, Python 3.11+ support
 - **Ruff**: Fast linter replacing flake8/isort/pylint
 - **MyPy**: Optional type checking
 
@@ -53,7 +53,7 @@ All linting settings in `pyproject.toml`:
 
 ### Code Style
 - Line length: 120 characters max
-- Python version: 3.8+ compatibility
+- Python version: 3.11+ compatibility
 - Type hints: Use modern syntax where possible
 - Imports: Auto-sorted by Ruff (stdlib → third-party → first-party)
 
@@ -325,5 +325,5 @@ When making changes, test in both projects.
 
 ---
 
-*Last updated: 2025-11-22*
-*Version: 0.1.0*
+*Last updated: 2024-11-25*
+*Version: 0.4.0*
