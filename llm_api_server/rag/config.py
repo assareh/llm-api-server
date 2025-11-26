@@ -56,6 +56,7 @@ class RAGConfig:
     max_workers: int = 5
     max_pages: int | None = None
     request_timeout: float = 10.0  # HTTP request timeout in seconds
+    max_url_retries: int = 3  # Skip URLs after this many consecutive failures
     url_include_patterns: list[str] = field(default_factory=list)
     url_exclude_patterns: list[str] = field(default_factory=list)
 

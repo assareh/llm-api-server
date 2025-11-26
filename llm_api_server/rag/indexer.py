@@ -164,6 +164,7 @@ class DocSearchIndex:
         discovered_urls = crawl_state.get("discovered_urls", [])
         previous_max_pages = crawl_state.get("max_pages_limit")
         crawl_complete = crawl_state.get("crawl_complete", False)
+        failed_urls = crawl_state.get("failed_urls", {})
 
         # Determine if we're resuming, expanding, or starting fresh
         is_resuming = bool(indexed_urls_set) and not force_rebuild
@@ -178,6 +179,7 @@ class DocSearchIndex:
             indexed_urls_set = set()
             discovered_urls = []
             crawl_complete = False
+            failed_urls = {}
         elif is_resuming:
             logger.info(f"[RAG] Resuming crawl: {len(indexed_urls_set)} URLs already indexed")
         elif is_expanding:
@@ -218,8 +220,23 @@ class DocSearchIndex:
         # Filter out already-indexed URLs
         urls_to_fetch = [url_info for url_info in url_list if url_info["url"] not in indexed_urls_set]
 
+        # Filter out URLs that have failed too many times
+        skipped_urls = []
+        filtered_urls_to_fetch = []
+        for url_info in urls_to_fetch:
+            url = url_info["url"]
+            if url in failed_urls and failed_urls[url].get("failure_count", 0) >= self.config.max_url_retries:
+                skipped_urls.append(url)
+            else:
+                filtered_urls_to_fetch.append(url_info)
+
+        if skipped_urls:
+            logger.info(f"[RAG] Skipping {len(skipped_urls)} URLs that exceeded {self.config.max_url_retries} retries")
+
+        urls_to_fetch = filtered_urls_to_fetch
+
         if not urls_to_fetch:
-            logger.info("[RAG] All URLs already indexed, loading existing index")
+            logger.info("[RAG] All URLs already indexed or skipped, loading existing index")
             self.load_index()
             return
 
@@ -228,8 +245,12 @@ class DocSearchIndex:
         # Phase 2: Fetch pages
         logger.info("[RAG] Phase 2/4: Fetching pages")
         start_time = time.time()
-        new_pages = self._fetch_pages(urls_to_fetch)
+        new_pages, failed_urls = self._fetch_pages(urls_to_fetch, failed_urls)
         logger.info(f"[RAG] Fetched {len(new_pages)} new pages in {time.time() - start_time:.1f}s")
+
+        # Save updated failure tracking
+        crawl_state["failed_urls"] = failed_urls
+        self._save_crawl_state(crawl_state)
 
         if not new_pages:
             logger.warning("[RAG] No new pages fetched!")
@@ -383,14 +404,17 @@ class DocSearchIndex:
         # Return top-k
         return results[:top_k]
 
-    def _fetch_pages(self, url_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Fetch pages with caching and parallel fetching.
+    def _fetch_pages(
+        self, url_list: list[dict[str, Any]], failed_urls: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Fetch pages with caching and parallel fetching, tracking failures.
 
         Args:
             url_list: List of URL info dicts
+            failed_urls: Dict of failed URL tracking info
 
         Returns:
-            List of page data dicts
+            Tuple of (list of page data dicts, updated failed_urls dict)
         """
         pages = []
         total = len(url_list)
@@ -403,6 +427,7 @@ class DocSearchIndex:
             # Process completed tasks
             for idx, future in enumerate(as_completed(future_to_url), 1):
                 url_info = future_to_url[future]
+                url = url_info["url"]
                 try:
                     result = future.result()
                     if result:
@@ -410,18 +435,25 @@ class DocSearchIndex:
                         if result.get("from_cache"):
                             cache_hits += 1
 
+                        # Success - clear any previous failures
+                        failed_urls.pop(url, None)
+
                         if idx % 10 == 0:
                             logger.info(
                                 f"[RAG] Fetched {idx}/{total} pages ({100*idx/total:.1f}%) - {cache_hits} from cache"
                             )
+                    else:
+                        # Fetch returned None (failure)
+                        self._track_url_failure(url, failed_urls, "Failed to fetch page")
 
                 except Exception as e:
-                    logger.error(f"[RAG] Failed to fetch {url_info['url']}: {e}")
+                    logger.error(f"[RAG] Failed to fetch {url}: {e}")
+                    self._track_url_failure(url, failed_urls, str(e))
 
         if cache_hits > 0:
             logger.info(f"[RAG] Cache hits: {cache_hits}/{len(pages)} ({100*cache_hits/len(pages):.1f}%)")
 
-        return pages
+        return pages, failed_urls
 
     def _fetch_page_with_cache(self, url_info: dict[str, Any]) -> dict[str, Any] | None:
         """Fetch a page with caching support.
@@ -861,3 +893,27 @@ class DocSearchIndex:
             logger.debug(f"[RAG] Saved crawl state: {len(state.get('indexed_urls', []))} indexed URLs")
         except Exception as e:
             logger.error(f"[RAG] Failed to save crawl state: {e}")
+
+    def _track_url_failure(self, url: str, failed_urls: dict[str, Any], error_msg: str):
+        """Track failed URL attempts with error details.
+
+        Args:
+            url: The URL that failed
+            failed_urls: Dict tracking failed URLs
+            error_msg: Error message from the failure
+        """
+        if url not in failed_urls:
+            failed_urls[url] = {"failure_count": 0, "first_error": error_msg, "last_error": error_msg}
+
+        failed_urls[url]["failure_count"] += 1
+        failed_urls[url]["last_error"] = error_msg
+        failed_urls[url]["last_attempt"] = datetime.now().isoformat()
+
+        count = failed_urls[url]["failure_count"]
+        if count >= self.config.max_url_retries:
+            logger.warning(
+                f"[RAG] URL {url} failed {count} times (limit: {self.config.max_url_retries}), "
+                "will skip on future crawls"
+            )
+        else:
+            logger.debug(f"[RAG] URL {url} failure count: {count}/{self.config.max_url_retries}")
