@@ -65,6 +65,7 @@ class DocSearchIndex:
         self.metadata_file = self.cache_dir / "metadata.json"
         self.chunks_file = self.cache_dir / "chunks.json"
         self.parent_chunks_file = self.cache_dir / "parent_chunks.json"
+        self.crawl_state_file = self.cache_dir / "crawl_state.json"
 
         # Components (lazy-loaded)
         self.embeddings: HuggingFaceEmbeddings | None = None
@@ -128,6 +129,11 @@ class DocSearchIndex:
     def crawl_and_index(self, force_rebuild: bool = False):
         """Discover URLs, crawl pages, chunk content, and build search index.
 
+        Supports:
+        - Incremental updates (resume interrupted crawls)
+        - Expanding max_pages limit without full rebuild
+        - Stateful crawling with progress tracking
+
         Args:
             force_rebuild: Force full rebuild even if index is up-to-date
         """
@@ -140,42 +146,144 @@ class DocSearchIndex:
         logger.info("[RAG] Starting document indexing pipeline")
         logger.info("[RAG] " + "=" * 70)
 
-        # Phase 1: Discover URLs
-        logger.info("[RAG] Phase 1/4: Discovering URLs")
-        start_time = time.time()
-        url_list = self.crawler.discover_and_crawl()
-        logger.info(f"[RAG] Discovered {len(url_list)} URLs in {time.time() - start_time:.1f}s")
+        # Load existing crawl state
+        crawl_state = self._load_crawl_state()
+        indexed_urls_set = set(crawl_state.get("indexed_urls", []))
+        discovered_urls = crawl_state.get("discovered_urls", [])
+        previous_max_pages = crawl_state.get("max_pages_limit")
+        crawl_complete = crawl_state.get("crawl_complete", False)
+
+        # Determine if we're resuming, expanding, or starting fresh
+        is_resuming = bool(indexed_urls_set) and not force_rebuild
+        is_expanding = (
+            previous_max_pages is not None
+            and self.config.max_pages is not None
+            and self.config.max_pages > previous_max_pages
+        )
+
+        if force_rebuild:
+            logger.info("[RAG] Force rebuild requested, starting fresh")
+            indexed_urls_set = set()
+            discovered_urls = []
+            crawl_complete = False
+        elif is_resuming:
+            logger.info(f"[RAG] Resuming crawl: {len(indexed_urls_set)} URLs already indexed")
+        elif is_expanding:
+            logger.info(
+                f"[RAG] Expanding max_pages from {previous_max_pages} to {self.config.max_pages}, "
+                "will index additional pages"
+            )
+
+        # Phase 1: Discover URLs (if needed)
+        if not crawl_complete or is_expanding or force_rebuild:
+            logger.info("[RAG] Phase 1/4: Discovering URLs")
+            start_time = time.time()
+            url_list = self.crawler.discover_and_crawl()
+
+            # Update state
+            discovered_urls = [url_info["url"] for url_info in url_list]
+            crawl_complete = True
+
+            # Save discovery state
+            crawl_state.update(
+                {
+                    "discovered_urls": discovered_urls,
+                    "crawl_complete": crawl_complete,
+                    "max_pages_limit": self.config.max_pages,
+                }
+            )
+            self._save_crawl_state(crawl_state)
+
+            logger.info(f"[RAG] Discovered {len(discovered_urls)} URLs in {time.time() - start_time:.1f}s")
+        else:
+            logger.info(f"[RAG] Phase 1/4: Using cached URL list ({len(discovered_urls)} URLs)")
+            url_list = [{"url": url} for url in discovered_urls]
 
         if not url_list:
             logger.error("[RAG] No URLs discovered!")
             return
 
+        # Filter out already-indexed URLs
+        urls_to_fetch = [url_info for url_info in url_list if url_info["url"] not in indexed_urls_set]
+
+        if not urls_to_fetch:
+            logger.info("[RAG] All URLs already indexed, loading existing index")
+            self.load_index()
+            return
+
+        logger.info(f"[RAG] {len(urls_to_fetch)} new URLs to index (out of {len(url_list)} total)")
+
         # Phase 2: Fetch pages
         logger.info("[RAG] Phase 2/4: Fetching pages")
         start_time = time.time()
-        pages = self._fetch_pages(url_list)
-        logger.info(f"[RAG] Fetched {len(pages)} pages in {time.time() - start_time:.1f}s")
+        new_pages = self._fetch_pages(urls_to_fetch)
+        logger.info(f"[RAG] Fetched {len(new_pages)} new pages in {time.time() - start_time:.1f}s")
 
-        if not pages:
-            logger.error("[RAG] No pages fetched!")
+        if not new_pages:
+            logger.warning("[RAG] No new pages fetched!")
+            if indexed_urls_set:
+                logger.info("[RAG] Loading existing index")
+                self.load_index()
             return
 
         # Phase 3: Chunk content
         logger.info("[RAG] Phase 3/4: Chunking content")
         start_time = time.time()
-        self._create_chunks(pages)
+
+        # If resuming/expanding, load existing chunks first
+        if is_resuming or is_expanding:
+            logger.info("[RAG] Loading existing chunks for incremental update")
+            existing_chunks = self._load_chunks() or []
+            existing_parent_chunks = self._load_parent_chunks() or {}
+            logger.info(f"[RAG] Loaded {len(existing_chunks)} existing chunks")
+
+            # Set up for incremental update
+            self.chunks = existing_chunks
+            self.parent_chunks = existing_parent_chunks
+            # Rebuild child_to_parent mapping from existing chunks
+            self.child_to_parent = {}
+            for chunk in self.chunks:
+                chunk_id = chunk.metadata.get("chunk_id")
+                parent_id = chunk.metadata.get("parent_id")
+                if chunk_id and parent_id:
+                    self.child_to_parent[chunk_id] = parent_id
+        else:
+            # Fresh build - initialize empty
+            self.chunks = []
+            self.parent_chunks = {}
+            self.child_to_parent = {}
+
+        # Create chunks from new pages
+        new_chunk_count_before = len(self.chunks)
+        self._create_chunks(new_pages)
+        new_chunk_count = len(self.chunks) - new_chunk_count_before
+
         logger.info(
-            f"[RAG] Created {len(self.chunks)} child chunks from {len(self.parent_chunks)} parents in {time.time() - start_time:.1f}s"
+            f"[RAG] Created {new_chunk_count} new child chunks from {len(new_pages)} pages in {time.time() - start_time:.1f}s"
         )
+        logger.info(f"[RAG] Total chunks: {len(self.chunks)} (parents: {len(self.parent_chunks)})")
 
         # Save chunks
         self._save_chunks()
         self._save_parent_chunks()
 
-        # Phase 4: Build index
+        # Update indexed URLs
+        newly_indexed = {page["url"] for page in new_pages}
+        indexed_urls_set.update(newly_indexed)
+        crawl_state["indexed_urls"] = list(indexed_urls_set)
+        self._save_crawl_state(crawl_state)
+
+        # Phase 4: Build/update index
         logger.info("[RAG] Phase 4/4: Building search index")
         start_time = time.time()
-        self._build_index()
+
+        if is_resuming or is_expanding:
+            # Incremental update
+            self._update_index_incremental()
+        else:
+            # Full rebuild
+            self._build_index()
+
         logger.info(f"[RAG] Built index in {time.time() - start_time:.1f}s")
 
         # Save metadata
@@ -185,6 +293,7 @@ class DocSearchIndex:
 
         logger.info("[RAG] " + "=" * 70)
         logger.info("[RAG] Indexing complete!")
+        logger.info(f"[RAG] Total indexed: {len(indexed_urls_set)} URLs, {len(self.chunks)} chunks")
         logger.info("[RAG] " + "=" * 70)
 
     def load_index(self):
@@ -405,12 +514,13 @@ class DocSearchIndex:
     def _create_chunks(self, pages: list[dict[str, Any]]):
         """Create parent-child chunks from pages using semantic HTML chunking.
 
+        Appends new chunks to existing ones (for incremental updates).
+
         Args:
             pages: List of page data dicts with HTML
         """
-        self.chunks = []
-        self.parent_chunks = {}
-        self.child_to_parent = {}
+        # Don't reset - append to existing chunks for incremental updates
+        # (caller sets self.chunks to [] for full rebuild or existing chunks for incremental)
 
         for idx, page in enumerate(pages, 1):
             try:
@@ -537,6 +647,74 @@ class DocSearchIndex:
             weights=[self.config.hybrid_bm25_weight, self.config.hybrid_semantic_weight],
         )
 
+    def _update_index_incremental(self):
+        """Update existing index with new documents (incremental).
+
+        This is more efficient than full rebuild for large indexes.
+        Loads existing FAISS index and adds new documents to it.
+        """
+        # Load existing chunks count from metadata
+        metadata = self._load_metadata()
+        existing_chunk_count = metadata.get("num_chunks", 0)
+
+        if existing_chunk_count == 0:
+            # No existing index, do full build
+            logger.info("[RAG] No existing index found, performing full build")
+            self._build_index()
+            return
+
+        # Calculate new chunks to add
+        new_chunk_count = len(self.chunks) - existing_chunk_count
+        if new_chunk_count <= 0:
+            logger.warning("[RAG] No new chunks to add, rebuilding retrievers only")
+            self._build_retrievers()
+            return
+
+        logger.info(f"[RAG] Incremental update: adding {new_chunk_count} new chunks to existing index")
+
+        # Initialize components if needed
+        self._initialize_components()
+
+        # Load existing FAISS index
+        faiss_path = str(self.index_dir / "faiss_index")
+        try:
+            logger.info(f"[RAG] Loading existing FAISS index from {faiss_path}")
+            self.vectorstore = FAISS.load_local(
+                faiss_path, self.embeddings, allow_dangerous_deserialization=True  # Safe for our own indexes
+            )
+            logger.info(f"[RAG] Loaded existing index with {existing_chunk_count} chunks")
+
+            # Get only the new chunks
+            new_chunks = self.chunks[existing_chunk_count:]
+            logger.info(f"[RAG] Adding {len(new_chunks)} new chunks to FAISS index")
+
+            # Add new documents to existing index
+            self.vectorstore.add_documents(new_chunks)
+
+            # Save updated index
+            self.vectorstore.save_local(faiss_path)
+            logger.info(f"[RAG] Updated FAISS index saved to {faiss_path}")
+
+        except Exception as e:
+            logger.warning(f"[RAG] Failed to load existing FAISS index: {e}, performing full rebuild")
+            self._build_index()
+            return
+
+        # Rebuild BM25 retriever (fast, must use all chunks)
+        logger.info("[RAG] Rebuilding BM25 retriever with all chunks")
+        self.bm25_retriever = BM25Retriever.from_documents(self.chunks)
+        self.bm25_retriever.k = self.config.search_top_k * 3
+
+        # Rebuild ensemble retriever
+        logger.info("[RAG] Rebuilding ensemble retriever")
+        self.ensemble_retriever = EnsembleRetriever(
+            retrievers=[
+                self.bm25_retriever,
+                self.vectorstore.as_retriever(search_kwargs={"k": self.config.search_top_k * 3}),
+            ],
+            weights=[self.config.hybrid_bm25_weight, self.config.hybrid_semantic_weight],
+        )
+
     def _rerank_results(self, query: str, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Re-rank results using cross-encoder.
 
@@ -638,3 +816,34 @@ class DocSearchIndex:
         except Exception as e:
             logger.warning(f"[RAG] Failed to load parent chunks: {e}")
             return None
+
+    def _load_crawl_state(self) -> dict[str, Any]:
+        """Load crawl state from disk.
+
+        Returns:
+            Crawl state dict with discovered_urls, indexed_urls, etc.
+        """
+        if not self.crawl_state_file.exists():
+            return {}
+        try:
+            state = json.loads(self.crawl_state_file.read_text())
+            logger.info(
+                f"[RAG] Loaded crawl state: {len(state.get('discovered_urls', []))} discovered, "
+                f"{len(state.get('indexed_urls', []))} indexed"
+            )
+            return state
+        except Exception as e:
+            logger.warning(f"[RAG] Failed to load crawl state: {e}")
+            return {}
+
+    def _save_crawl_state(self, state: dict[str, Any]):
+        """Save crawl state to disk.
+
+        Args:
+            state: Crawl state dict with discovered_urls, indexed_urls, etc.
+        """
+        try:
+            self.crawl_state_file.write_text(json.dumps(state, indent=2))
+            logger.debug(f"[RAG] Saved crawl state: {len(state.get('indexed_urls', []))} indexed URLs")
+        except Exception as e:
+            logger.error(f"[RAG] Failed to save crawl state: {e}")
