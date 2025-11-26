@@ -37,6 +37,7 @@ class DocumentCrawler:
         rate_limit_delay: float = 0.1,
         max_workers: int = 5,
         max_pages: int | None = None,
+        request_timeout: float = 10.0,
         url_include_patterns: list[str] | None = None,
         url_exclude_patterns: list[str] | None = None,
         user_agent: str = DEFAULT_USER_AGENT,
@@ -52,6 +53,7 @@ class DocumentCrawler:
             rate_limit_delay: Delay between requests in seconds
             max_workers: Number of parallel workers for fetching
             max_pages: Maximum total pages to crawl (None = unlimited)
+            request_timeout: HTTP request timeout in seconds
             url_include_patterns: Regex patterns - only crawl matching URLs
             url_exclude_patterns: Regex patterns - skip matching URLs
             user_agent: User agent string for requests
@@ -64,6 +66,7 @@ class DocumentCrawler:
         self.rate_limit_delay = rate_limit_delay
         self.max_workers = max_workers
         self.max_pages = max_pages
+        self.request_timeout = request_timeout
         self.user_agent = user_agent
 
         # Compile URL patterns
@@ -79,7 +82,7 @@ class DocumentCrawler:
         self.robot_parser.set_url(robots_url)
         try:
             # Fetch robots.txt to parse both rules and sitemap URLs
-            response = requests.get(robots_url, headers={"User-Agent": user_agent}, timeout=30)
+            response = requests.get(robots_url, headers={"User-Agent": user_agent}, timeout=request_timeout)
             response.raise_for_status()
 
             # Parse sitemap URLs from robots.txt
@@ -170,7 +173,9 @@ class DocumentCrawler:
         for sitemap_url in sitemap_urls:
             try:
                 logger.info(f"[CRAWLER] Trying sitemap: {sitemap_url}")
-                response = requests.get(sitemap_url, headers={"User-Agent": self.user_agent}, timeout=30)
+                response = requests.get(
+                    sitemap_url, headers={"User-Agent": self.user_agent}, timeout=self.request_timeout
+                )
                 response.raise_for_status()
 
                 # Parse the sitemap
@@ -224,7 +229,7 @@ class DocumentCrawler:
                 for sitemap_info in sub_sitemaps:
                     try:
                         response = requests.get(
-                            sitemap_info["url"], headers={"User-Agent": self.user_agent}, timeout=30
+                            sitemap_info["url"], headers={"User-Agent": self.user_agent}, timeout=self.request_timeout
                         )
                         response.raise_for_status()
                         sub_urls = self._parse_sitemap_xml(response.content)
@@ -290,7 +295,9 @@ class DocumentCrawler:
                 logger.info(f"[CRAWLER] [{len(urls)}/{self.max_pages or '∞'}] Crawling depth {depth}: {current_url}")
                 time.sleep(self.rate_limit_delay)
 
-                response = requests.get(current_url, headers={"User-Agent": self.user_agent}, timeout=30)
+                response = requests.get(
+                    current_url, headers={"User-Agent": self.user_agent}, timeout=self.request_timeout
+                )
                 response.raise_for_status()
 
                 # Only parse HTML content, skip XML/RSS/etc
@@ -351,7 +358,7 @@ class DocumentCrawler:
                 logger.debug(f"[CRAWLER] Skipping robots.txt check (not loaded) for: {url}")
 
             logger.debug(f"[CRAWLER] Fetching: {url}")
-            response = requests.get(url, headers={"User-Agent": self.user_agent}, timeout=30)
+            response = requests.get(url, headers={"User-Agent": self.user_agent}, timeout=self.request_timeout)
             response.raise_for_status()
 
             # Only process HTML content

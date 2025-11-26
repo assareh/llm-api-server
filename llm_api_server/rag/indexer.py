@@ -90,6 +90,7 @@ class DocSearchIndex:
             rate_limit_delay=config.rate_limit_delay,
             max_workers=config.max_workers,
             max_pages=config.max_pages,
+            request_timeout=config.request_timeout,
             url_include_patterns=config.url_include_patterns,
             url_exclude_patterns=config.url_exclude_patterns,
         )
@@ -833,15 +834,16 @@ class DocSearchIndex:
         """Load crawl state from disk.
 
         Returns:
-            Crawl state dict with discovered_urls, indexed_urls, etc.
+            Crawl state dict with discovered_urls, indexed_urls, failed_urls, etc.
         """
         if not self.crawl_state_file.exists():
             return {}
         try:
             state = json.loads(self.crawl_state_file.read_text())
+            failed_urls = state.get("failed_urls", {})
             logger.info(
                 f"[RAG] Loaded crawl state: {len(state.get('discovered_urls', []))} discovered, "
-                f"{len(state.get('indexed_urls', []))} indexed"
+                f"{len(state.get('indexed_urls', []))} indexed, {len(failed_urls)} failed"
             )
             return state
         except Exception as e:
