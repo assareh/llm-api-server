@@ -121,9 +121,7 @@ class DocSearchIndex:
             and self.config.max_pages is not None
             and self.config.max_pages > previous_max_pages
         ):
-            logger.info(
-                f"[RAG] max_pages increased from {previous_max_pages} to {self.config.max_pages}, needs update"
-            )
+            logger.info(f"[RAG] max_pages increased from {previous_max_pages} to {self.config.max_pages}, needs update")
             return True
 
         # Check time since last update
@@ -680,6 +678,7 @@ class DocSearchIndex:
         new_chunk_count = len(self.chunks) - existing_chunk_count
         if new_chunk_count <= 0:
             logger.warning("[RAG] No new chunks to add, rebuilding retrievers only")
+            self._initialize_components()
             self._build_retrievers()
             return
 
