@@ -54,6 +54,10 @@ Homepage = "https://github.com/assareh/llm-api-server"
 Repository = "https://github.com/assareh/llm-api-server"
 Issues = "https://github.com/assareh/llm-api-server/issues"
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["llm_api_server*"]
+
 [tool.black]
 line-length = 120
 target-version = ['py311', 'py312']

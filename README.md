@@ -2,6 +2,8 @@
 
 A reusable Flask server providing an OpenAI-compatible API for local LLM backends (Ollama, LM Studio) with tool calling support.
 
+**Requirements:** Python 3.11+
+
 ## Features
 
 - **OpenAI-compatible API** - Drop-in replacement for OpenAI's `/v1/chat/completions` endpoint
@@ -235,13 +237,18 @@ config = RAGConfig(
     manual_urls_only=False,                # True = only index manual URLs
     max_crawl_depth=3,                     # Maximum recursion depth
     rate_limit_delay=0.1,                  # Seconds between requests
+    max_workers=5,                         # Parallel fetching threads
     max_pages=None,                        # Limit total pages (None = unlimited)
+    request_timeout=10.0,                  # HTTP request timeout in seconds
+    max_url_retries=3,                     # Skip URLs after N consecutive failures
     url_include_patterns=["docs/.*"],      # Regex patterns to include
     url_exclude_patterns=[".*/api/.*"],    # Regex patterns to exclude
 
     # Chunking settings
     child_chunk_size=350,                  # Tokens per child chunk
+    child_chunk_overlap=50,                # Overlap tokens between child chunks
     parent_chunk_size=900,                 # Tokens per parent chunk
+    parent_chunk_overlap=100,              # Overlap tokens between parent chunks
 
     # Search settings
     hybrid_bm25_weight=0.3,                # BM25 keyword search weight
@@ -252,6 +259,8 @@ config = RAGConfig(
 
     # Model settings
     embedding_model="all-MiniLM-L6-v2",    # HuggingFace model (~80MB)
+    rerank_model="cross-encoder/ms-marco-MiniLM-L-12-v2",      # Heavy cross-encoder
+    light_rerank_model="cross-encoder/ms-marco-MiniLM-L-6-v2", # Light cross-encoder
 
     # Index settings
     update_check_interval_hours=168,       # Check for updates (7 days)
@@ -467,12 +476,12 @@ You are MyApp, an AI assistant specialized in...
 
 The server automatically reloads this file when it changes (based on modification time).
 
-## Examples
+## Example Projects
 
-See the `examples/` directory for complete examples:
+See these projects using LLM API Server:
 
-- **Ivan** - HashiCorp documentation expert
-- **Miles** - Credit card rewards optimizer
+- **[Ivan](https://github.com/assareh/ivan)** - HashiCorp documentation expert
+- **[milesoss](https://github.com/assareh/milesoss)** - Credit card rewards optimizer
 
 ## Development
 
