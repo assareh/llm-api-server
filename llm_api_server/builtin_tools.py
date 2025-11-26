@@ -17,13 +17,26 @@ if TYPE_CHECKING:
 
 
 @tool
-def get_current_date() -> str:
-    """Get the current date in YYYY-MM-DD format using the local timezone.
+def get_current_datetime() -> str:
+    """Get the current date and time in the local timezone.
+
+    Returns the current date and time formatted for human readability,
+    including the timezone name. This is useful for answering questions
+    about "what time is it" or "what's today's date".
 
     Returns:
-        Current date as a string in local timezone (e.g., "2025-11-21")
+        Current date and time string (e.g., "Wednesday, November 26, 2025 at 2:30 PM PST")
     """
-    return datetime.now().astimezone().strftime("%Y-%m-%d")
+    # Get current time in local timezone
+    local_tz = datetime.now().astimezone().tzinfo
+    now = datetime.now(local_tz)
+
+    # Format: "Wednesday, November 26, 2025 at 2:30 PM PST"
+    date_str = now.strftime("%A, %B %d, %Y")
+    time_str = now.strftime("%I:%M %p").lstrip("0")  # Remove leading zero from hour
+    tz_name = now.strftime("%Z")
+
+    return f"{date_str} at {time_str} {tz_name}"
 
 
 @tool
@@ -124,7 +137,7 @@ def create_web_search_tool(config: "ServerConfig") -> Tool:
         >>> from llm_api_server import ServerConfig, create_web_search_tool
         >>> config = ServerConfig.from_env()
         >>> web_search = create_web_search_tool(config)
-        >>> tools = [get_current_date, calculate, web_search]
+        >>> tools = [get_current_datetime, calculate, web_search]
     """
     from .web_search_tool import web_search
 
@@ -142,7 +155,7 @@ def create_web_search_tool(config: "ServerConfig") -> Tool:
 
 # Collection of all built-in tools
 BUILTIN_TOOLS = [
-    get_current_date,
+    get_current_datetime,
     calculate,
 ]
 
@@ -152,5 +165,5 @@ __all__ = [
     "WebSearchInput",
     "calculate",
     "create_web_search_tool",
-    "get_current_date",
+    "get_current_datetime",
 ]

@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatic max_pages expansion detection
 
 ### Changed
-- `get_current_date()` now explicitly uses local timezone instead of potentially defaulting to UTC
+- Renamed `get_current_date()` to `get_current_datetime()` - now returns full date, time, and timezone in human-readable format (e.g., "Wednesday, November 26, 2025 at 2:30 PM PST")
 - RAG crawler now uses shorter 10s timeout by default for better responsiveness
 
 ### Fixed

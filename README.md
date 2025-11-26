@@ -114,7 +114,7 @@ LLM API Server includes common tools that you can use out of the box:
 
 ```python
 from llm_api_server import LLMServer, BUILTIN_TOOLS, ServerConfig
-from llm_api_server import get_current_date, calculate, create_web_search_tool
+from llm_api_server import get_current_datetime, calculate, create_web_search_tool
 from langchain_core.tools import tool
 
 config = ServerConfig.from_env("MYAPP_")
@@ -131,7 +131,7 @@ server = LLMServer(
 server = LLMServer(
     name="MyApp",
     model_name="myapp/assistant",
-    tools=[get_current_date, calculate],
+    tools=[get_current_datetime, calculate],
     config=config
 )
 
@@ -160,7 +160,7 @@ server = LLMServer(
 
 ### Available Built-in Tools
 
-- **`get_current_date()`** - Returns the current date in YYYY-MM-DD format
+- **`get_current_datetime()`** - Returns the current date and time in local timezone (e.g., "Wednesday, November 26, 2025 at 2:30 PM PST")
 - **`calculate(expression: str)`** - Safely evaluates mathematical expressions
   - Supports: `+`, `-`, `*`, `/`, `//`, `%`, `**` (power)
   - Example: `calculate("2 + 3 * 4")` → `"14"`

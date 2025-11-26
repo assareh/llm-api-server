@@ -4,7 +4,7 @@ from .builtin_tools import (
     BUILTIN_TOOLS,
     calculate,
     create_web_search_tool,
-    get_current_date,
+    get_current_datetime,
 )
 from .config import ServerConfig
 from .server import LLMServer
@@ -20,5 +20,5 @@ __all__ = [
     "ServerConfig",
     "calculate",
     "create_web_search_tool",
-    "get_current_date",
+    "get_current_datetime",
 ]

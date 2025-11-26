@@ -198,7 +198,7 @@ config = ServerConfig.from_env("MYAPP_")
 The framework provides reusable tools:
 
 **Always available:**
-- `get_current_date()` - Returns current date in YYYY-MM-DD format
+- `get_current_datetime()` - Returns current date and time in local timezone
 - `calculate(expression)` - Safe mathematical expression evaluator
 
 **Optional (requires `--extra websearch`):**
