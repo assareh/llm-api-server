@@ -61,8 +61,10 @@ class LLMServer:
         # Rate limiter (initialized if enabled)
         self._limiter = None
 
-        # Create Flask app
-        self.app = Flask(name.lower())
+        # Create Flask app with unique name to avoid conflicts
+        # Use full name with prefix to ensure uniqueness across projects
+        flask_app_name = f"llm_api_server_{name.lower().replace(' ', '_')}"
+        self.app = Flask(flask_app_name)
         CORS(self.app)
 
         # Configure rate limiting if enabled

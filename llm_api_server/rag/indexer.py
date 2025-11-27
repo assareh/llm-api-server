@@ -625,6 +625,7 @@ class DocSearchIndex:
         """Create parent-child chunks from pages using semantic HTML chunking.
 
         Appends new chunks to existing ones (for incremental updates).
+        Deduplicates pages with identical content (keeping the first URL encountered).
 
         Args:
             pages: List of page data dicts with HTML
@@ -632,7 +633,25 @@ class DocSearchIndex:
         # Don't reset - append to existing chunks for incremental updates
         # (caller sets self.chunks to [] for full rebuild or existing chunks for incremental)
 
-        for idx, page in enumerate(pages, 1):
+        # Deduplicate pages by content hash to avoid indexing identical content
+        # (e.g., same content at different URLs, versioned pages with identical text)
+        seen_content_hashes: set[str] = set()
+        deduplicated_pages: list[dict[str, Any]] = []
+        duplicates_skipped = 0
+
+        for page in pages:
+            content_hash = hashlib.sha256(page["html"].encode()).hexdigest()
+            if content_hash not in seen_content_hashes:
+                seen_content_hashes.add(content_hash)
+                deduplicated_pages.append(page)
+            else:
+                duplicates_skipped += 1
+                logger.debug(f"[RAG] Skipping duplicate content: {page['url']}")
+
+        if duplicates_skipped > 0:
+            logger.info(f"[RAG] Deduplicated {duplicates_skipped} pages with identical content")
+
+        for idx, page in enumerate(deduplicated_pages, 1):
             try:
                 # Use semantic chunking
                 result = semantic_chunk_html(
@@ -642,6 +661,7 @@ class DocSearchIndex:
                     child_max_tokens=self.config.child_chunk_size,
                     parent_min_tokens=self.config.parent_chunk_size // 3,
                     parent_max_tokens=self.config.parent_chunk_size,
+                    absolute_max_tokens=self.config.absolute_max_chunk_tokens,
                 )
 
                 parents = result.get("parents", [])
@@ -710,9 +730,10 @@ class DocSearchIndex:
                     self.chunks.append(doc)
 
                 # More frequent progress updates (every 10 pages or at key milestones)
-                if idx % 10 == 0 or idx == len(pages) or idx in [1, 5, 25, 50]:
+                total_pages = len(deduplicated_pages)
+                if idx % 10 == 0 or idx == total_pages or idx in [1, 5, 25, 50]:
                     logger.info(
-                        f"[RAG] Chunking: {idx}/{len(pages)} pages ({100*idx/len(pages):.1f}%) - "
+                        f"[RAG] Chunking: {idx}/{total_pages} pages ({100*idx/total_pages:.1f}%) - "
                         f"{len(self.chunks)} child chunks, {len(self.parent_chunks)} parent chunks"
                     )
 
@@ -967,8 +988,19 @@ class DocSearchIndex:
             pairs = [[query, result["text"]] for result in results]
             scores = self.cross_encoder.predict(pairs)
 
+            # Normalize scores to 0-1 range using min-max scaling
+            # This ensures consistent scoring regardless of cross-encoder model characteristics
+            min_score = float(min(scores))
+            max_score = float(max(scores))
+            score_range = max_score - min_score
+
             for result, score in zip(results, scores):
-                result["score"] = float(score)
+                if score_range > 0:
+                    # Normalize to 0-1 range
+                    result["score"] = (float(score) - min_score) / score_range
+                else:
+                    # All scores identical, assign uniform score
+                    result["score"] = 1.0
 
             # Sort by final score
             results = sorted(results, key=lambda x: x["score"], reverse=True)

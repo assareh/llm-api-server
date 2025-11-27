@@ -1,7 +1,9 @@
 """Validation functions for test case responses."""
 
+from .test_case import TestCase
 
-def validate_response(test_case, response: str) -> tuple[bool, list[str]]:
+
+def validate_response(test_case: TestCase, response: str) -> tuple[bool, list[str]]:
     """Validate a response against test case criteria.
 
     Args:

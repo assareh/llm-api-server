@@ -104,7 +104,8 @@ class ServerConfig:
             return os.getenv(name, default)
 
         # Load configuration from environment
-        config.BACKEND_TYPE = get_env("BACKEND", cls.BACKEND_TYPE)
+        # Support both BACKEND and BACKEND_TYPE env vars (BACKEND_TYPE takes precedence)
+        config.BACKEND_TYPE = get_env("BACKEND_TYPE", None) or get_env("BACKEND", cls.BACKEND_TYPE)
         config.BACKEND_MODEL = get_env("BACKEND_MODEL", cls.BACKEND_MODEL)
         config.LMSTUDIO_ENDPOINT = get_env("LMSTUDIO_ENDPOINT", cls.LMSTUDIO_ENDPOINT)
         config.OLLAMA_ENDPOINT = get_env("OLLAMA_ENDPOINT", cls.OLLAMA_ENDPOINT)

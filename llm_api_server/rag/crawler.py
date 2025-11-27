@@ -314,9 +314,10 @@ class DocumentCrawler:
         Returns:
             List of URL info dicts
         """
-        visited = set()
-        to_visit = [(self.base_url, 0)]  # (url, depth)
-        urls = []
+        visited: set[str] = set()
+        queued: set[str] = {self.base_url}  # Track URLs in queue for O(1) lookup
+        to_visit: list[tuple[str, int]] = [(self.base_url, 0)]  # (url, depth)
+        urls: list[dict[str, Any]] = []
 
         logger.info(f"[CRAWLER] Starting recursive crawl from {self.base_url} (max depth: {self.max_crawl_depth})...")
 
@@ -377,9 +378,10 @@ class DocumentCrawler:
                         if not href.startswith(self.base_url):
                             continue
 
-                    # Normalize and add to queue
+                    # Normalize and add to queue (use queued set for O(1) lookup)
                     href = self._normalize_url(href)
-                    if href not in visited and (href, depth + 1) not in to_visit:
+                    if href not in visited and href not in queued:
+                        queued.add(href)
                         to_visit.append((href, depth + 1))
 
             except Exception as e:

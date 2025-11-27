@@ -46,8 +46,19 @@ BOILERPLATE_SELECTORS = [
     'a[class*="edit"]',
 ]
 
-# Minimum content length (characters) to create a chunk - skip tiny fragments
+# Minimum content length in characters to create a chunk.
+# Content blocks shorter than this are skipped to avoid tiny, low-quality fragments
+# like navigation text, button labels, or isolated punctuation. The threshold of 20
+# characters was chosen empirically to filter noise while preserving meaningful
+# short content like code snippets, definitions, or brief paragraphs.
 MIN_CONTENT_LENGTH = 20
+
+# Ratio of child_min_tokens used as threshold for merged small content blocks.
+# When accumulating small fragments that individually are too small to be chunks,
+# we use this lower threshold (child_min_tokens * MERGED_CONTENT_THRESHOLD_RATIO)
+# to decide if the merged result is worth keeping. Set to 0.5 (50%) to allow
+# smaller merged chunks than normal minimum, while still filtering very tiny ones.
+MERGED_CONTENT_THRESHOLD_RATIO = 0.5
 
 
 @dataclass
@@ -616,7 +627,7 @@ def _create_children_from_section(
             return
         merged = "\n\n".join(pending_content)
         # Only create child if we have meaningful content
-        if pending_tokens >= child_min_tokens // 2:  # Lower threshold for merged content
+        if pending_tokens >= int(child_min_tokens * MERGED_CONTENT_THRESHOLD_RATIO):
             child_chunk = {
                 "chunk_id": f"{parent_id}_child_{child_idx}",
                 "parent_id": parent_id,

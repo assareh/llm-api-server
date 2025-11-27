@@ -27,6 +27,7 @@ class RAGConfig:
         child_chunk_overlap: Overlap tokens between child chunks (default: 50)
         parent_chunk_size: Target tokens per parent chunk (default: 900)
         parent_chunk_overlap: Overlap tokens between parent chunks (default: 100)
+        absolute_max_chunk_tokens: Hard limit for any chunk (default: 1200). Content exceeding this is split.
 
         # Search settings
         hybrid_bm25_weight: Weight for BM25 in Reciprocal Rank Fusion (default: 0.3).
@@ -67,6 +68,7 @@ class RAGConfig:
     child_chunk_overlap: int = 50
     parent_chunk_size: int = 900
     parent_chunk_overlap: int = 100
+    absolute_max_chunk_tokens: int = 1200  # Hard limit - split any content exceeding this
 
     # Search settings (uses Reciprocal Rank Fusion, not weighted average)
     hybrid_bm25_weight: float = 0.3  # RRF weight for BM25 keyword search
