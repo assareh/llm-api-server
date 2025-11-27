@@ -13,6 +13,7 @@ from typing import Any
 import requests
 from flask import Flask, Response, jsonify, request, stream_with_context
 from flask_cors import CORS
+from langchain_core.tools import BaseTool
 
 from .backends import call_lmstudio, call_ollama, check_lmstudio_health, check_ollama_health
 from .config import ServerConfig
@@ -25,10 +26,10 @@ class LLMServer:
         self,
         name: str,
         model_name: str,
-        tools: list,
+        tools: list[BaseTool],
         config: ServerConfig,
         default_system_prompt: str = "You are a helpful AI assistant.",
-        init_hook: Callable | None = None,
+        init_hook: Callable[[], None] | None = None,
         logger_names: list[str] | None = None,
     ):
         """Initialize LLM API Server.
@@ -56,9 +57,29 @@ class LLMServer:
         # WebUI process
         self._webui_process = None
 
+        # Rate limiter (initialized if enabled)
+        self._limiter = None
+
         # Create Flask app
         self.app = Flask(name.lower())
         CORS(self.app)
+
+        # Configure rate limiting if enabled
+        if config.RATE_LIMIT_ENABLED:
+            try:
+                from flask_limiter import Limiter
+                from flask_limiter.util import get_remote_address
+
+                self._limiter = Limiter(
+                    get_remote_address,
+                    app=self.app,
+                    default_limits=[config.RATE_LIMIT_DEFAULT],
+                    storage_uri=config.RATE_LIMIT_STORAGE_URI,
+                )
+                print(f"Rate limiting enabled: {config.RATE_LIMIT_DEFAULT}")
+            except ImportError:
+                print("Warning: RATE_LIMIT_ENABLED=true but flask-limiter not installed")
+                print("  Install with: pip install flask-limiter")
 
         # Configure logging
         self.logger = logging.getLogger(f"{name.lower()}.tools")
@@ -90,7 +111,13 @@ class LLMServer:
             print(f"  Logging: {', '.join(logger_names)}")
             print(f"  Rotation: {max_mb:.1f}MB max, {config.DEBUG_LOG_BACKUP_COUNT} backups")
         else:
-            self.logger.setLevel(logging.WARNING)
+            # Enable info-level logging to console for request/response visibility
+            self.logger.setLevel(logging.INFO)
+            if not self.logger.handlers:
+                console_handler = logging.StreamHandler()
+                console_handler.setLevel(logging.INFO)
+                console_handler.setFormatter(logging.Formatter("%(name)s - %(message)s"))
+                self.logger.addHandler(console_handler)
 
         # Register routes
         self._register_routes()
@@ -173,10 +200,70 @@ class LLMServer:
 
     def call_backend(self, messages: list[dict], temperature: float, stream: bool = False):
         """Call the configured backend."""
+        start_time = time.time()
         if self.config.BACKEND_TYPE == "ollama":
-            return call_ollama(messages, self.tools, self.config, temperature, stream)
+            result = call_ollama(messages, self.tools, self.config, temperature, stream)
         else:  # lmstudio
-            return call_lmstudio(messages, self.tools, self.config, temperature, stream)
+            result = call_lmstudio(messages, self.tools, self.config, temperature, stream)
+        if not stream:
+            duration = time.time() - start_time
+            self.logger.info(f"Backend call: {self.config.BACKEND_TYPE}/{self.config.BACKEND_MODEL} in {duration:.2f}s")
+        return result
+
+    def _extract_message_and_tool_calls(self, response_data: dict) -> tuple[dict, list]:
+        """Extract message and tool_calls from backend response.
+
+        Args:
+            response_data: JSON response from backend
+
+        Returns:
+            Tuple of (message dict, tool_calls list)
+        """
+        if self.config.BACKEND_TYPE == "ollama":
+            message = response_data.get("message", {})
+            tool_calls = message.get("tool_calls", [])
+        else:  # LM Studio (OpenAI format)
+            choice = response_data.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            tool_calls = message.get("tool_calls", [])
+        return message, tool_calls
+
+    def _execute_tool_calls(self, tool_calls: list, tools_used: list[str]) -> list[dict]:
+        """Execute tool calls and return formatted result messages.
+
+        Args:
+            tool_calls: List of tool call objects from backend
+            tools_used: List to append tool names to (modified in place)
+
+        Returns:
+            List of tool result messages formatted for the backend
+        """
+        result_messages = []
+        for tool_call in tool_calls:
+            function = tool_call.get("function", {})
+            tool_name = function.get("name")
+            if tool_name:
+                tools_used.append(tool_name)
+
+            # Parse arguments (LM Studio sends JSON string, Ollama sends dict)
+            if self.config.BACKEND_TYPE == "lmstudio":
+                tool_args = json.loads(function.get("arguments", "{}"))
+            else:
+                tool_args = function.get("arguments", {})
+
+            tool_result = self.execute_tool(tool_name, tool_args)
+
+            # Format result message for backend
+            if self.config.BACKEND_TYPE == "lmstudio":
+                result_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.get("id"),
+                    "content": tool_result
+                })
+            else:
+                result_messages.append({"role": "tool", "content": tool_result})
+
+        return result_messages
 
     def check_backend_health(self) -> bool:
         """Check if the backend is healthy and reachable.
@@ -196,8 +283,11 @@ class LLMServer:
 
         return is_healthy
 
-    def process_chat_completion(self, messages: list[dict], temperature: float, max_iterations: int = 5) -> dict:
+    def process_chat_completion(self, messages: list[dict], temperature: float, max_iterations: int | None = None) -> dict:
         """Process chat completion with tool calling loop (non-streaming)."""
+        if max_iterations is None:
+            max_iterations = self.config.MAX_TOOL_ITERATIONS
+
         # Add system prompt
         system_prompt = self.get_system_prompt()
         full_messages = [{"role": "system", "content": system_prompt}] + messages
@@ -278,12 +368,16 @@ class LLMServer:
                     "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
                 }
 
-            # Handle Ollama response format
-            if self.config.BACKEND_TYPE == "ollama":
-                message = response_data.get("message", {})
-                tool_calls = message.get("tool_calls", [])
+            # Extract message and tool calls from response
+            message, tool_calls = self._extract_message_and_tool_calls(response_data)
 
-                if not tool_calls:
+            if not tool_calls:
+                # No tool calls - return final response
+                if self.config.BACKEND_TYPE == "lmstudio":
+                    response_data["model"] = self.model_name
+                    response_data["tools_used"] = tools_used
+                    return response_data
+                else:
                     return {
                         "id": f"chatcmpl-{int(time.time())}",
                         "object": "chat.completion",
@@ -300,34 +394,10 @@ class LLMServer:
                         "tools_used": tools_used,
                     }
 
-                full_messages.append(message)
-                for tool_call in tool_calls:
-                    function = tool_call.get("function", {})
-                    tool_name = function.get("name")
-                    if tool_name:
-                        tools_used.append(tool_name)
-                    tool_result = self.execute_tool(tool_name, function.get("arguments", {}))
-                    full_messages.append({"role": "tool", "content": tool_result})
-
-            else:  # LM Studio (OpenAI format)
-                choice = response_data.get("choices", [{}])[0]
-                message = choice.get("message", {})
-                tool_calls = message.get("tool_calls", [])
-
-                if not tool_calls:
-                    response_data["model"] = self.model_name
-                    response_data["tools_used"] = tools_used
-                    return response_data
-
-                full_messages.append(message)
-                for tool_call in tool_calls:
-                    function = tool_call.get("function", {})
-                    tool_name = function.get("name")
-                    if tool_name:
-                        tools_used.append(tool_name)
-                    tool_args = json.loads(function.get("arguments", "{}"))
-                    tool_result = self.execute_tool(tool_name, tool_args)
-                    full_messages.append({"role": "tool", "tool_call_id": tool_call.get("id"), "content": tool_result})
+            # Execute tool calls and append results
+            full_messages.append(message)
+            tool_results = self._execute_tool_calls(tool_calls, tools_used)
+            full_messages.extend(tool_results)
 
         # Max iterations reached
         self.logger.warning(f"[TOOL LOOP] MAX ITERATIONS REACHED ({max_iterations}). Tools used: {tools_used}")
@@ -350,10 +420,110 @@ class LLMServer:
             "tools_used": tools_used,
         }
 
-    def stream_chat_response(
-        self, messages: list[dict], temperature: float, max_iterations: int = 5
+    def _stream_from_backend(
+        self, messages: list[dict], temperature: float
     ) -> Generator[str, None, None]:
-        """Stream chat completion with tool calling loop."""
+        """Stream response directly from backend, converting to OpenAI SSE format.
+
+        This performs true streaming - tokens are sent as they're generated by the backend.
+        """
+        chat_id = f"chatcmpl-{int(time.time())}"
+        created = int(time.time())
+
+        try:
+            response = self.call_backend(messages, temperature, stream=True)
+
+            if self.config.BACKEND_TYPE == "ollama":
+                # Ollama streams newline-delimited JSON
+                for line in response.iter_lines():
+                    if line:
+                        chunk_data = json.loads(line)
+                        message = chunk_data.get("message", {})
+                        content = message.get("content", "")
+                        done = chunk_data.get("done", False)
+
+                        if content:
+                            chunk = {
+                                "id": chat_id,
+                                "object": "chat.completion.chunk",
+                                "created": created,
+                                "model": self.model_name,
+                                "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
+                            }
+                            yield f"data: {json.dumps(chunk)}\n\n"
+
+                        if done:
+                            break
+            else:
+                # LM Studio uses OpenAI SSE format (data: {...}\n\n)
+                for line in response.iter_lines():
+                    if line:
+                        line_str = line.decode("utf-8") if isinstance(line, bytes) else line
+                        if line_str.startswith("data: "):
+                            data_str = line_str[6:]  # Remove "data: " prefix
+                            if data_str == "[DONE]":
+                                break
+                            chunk_data = json.loads(data_str)
+                            choice = chunk_data.get("choices", [{}])[0]
+                            delta = choice.get("delta", {})
+                            content = delta.get("content", "")
+
+                            if content:
+                                chunk = {
+                                    "id": chat_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created,
+                                    "model": self.model_name,
+                                    "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
+                                }
+                                yield f"data: {json.dumps(chunk)}\n\n"
+
+            # Final chunk with finish_reason
+            final_chunk = {
+                "id": chat_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": self.model_name,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+            yield f"data: {json.dumps(final_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        except requests.Timeout:
+            yield from self._yield_error_chunk(
+                f"Backend request timed out after {self.config.BACKEND_READ_TIMEOUT}s.\n\n"
+                f"Backend: {self.config.BACKEND_TYPE}\n"
+                f"Try: Increase BACKEND_READ_TIMEOUT or use a faster model"
+            )
+        except requests.ConnectionError:
+            yield from self._yield_error_chunk(
+                f"Could not connect to {self.config.BACKEND_TYPE} backend.\n\n"
+                f"Ensure {self.config.BACKEND_TYPE} is running and accessible"
+            )
+
+    def _yield_error_chunk(self, error_content: str) -> Generator[str, None, None]:
+        """Yield an error as an SSE chunk."""
+        error_chunk = {
+            "id": f"chatcmpl-{int(time.time())}",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": self.model_name,
+            "choices": [{"index": 0, "delta": {"content": error_content}, "finish_reason": "error"}],
+        }
+        yield f"data: {json.dumps(error_chunk)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    def stream_chat_response(
+        self, messages: list[dict], temperature: float, max_iterations: int | None = None
+    ) -> Generator[str, None, None]:
+        """Stream chat completion with tool calling loop.
+
+        Tool-calling iterations use non-streaming requests to detect tool calls.
+        The final response (no tool calls) uses true streaming from the backend.
+        """
+        if max_iterations is None:
+            max_iterations = self.config.MAX_TOOL_ITERATIONS
+
         system_prompt = self.get_system_prompt()
         full_messages = [{"role": "system", "content": system_prompt}] + messages
 
@@ -362,132 +532,42 @@ class LLMServer:
             iteration += 1
             self.logger.debug(f"[TOOL LOOP] Iteration {iteration}/{max_iterations}")
 
-            # Call backend with timeout handling
+            # Call backend without streaming to check for tool calls
             try:
                 response = self.call_backend(full_messages, temperature, stream=False)
                 response_data = response.json()
             except requests.Timeout:
-                backend_endpoint = (
-                    self.config.LMSTUDIO_ENDPOINT
-                    if self.config.BACKEND_TYPE == "lmstudio"
-                    else self.config.OLLAMA_ENDPOINT
-                )
-                error_content = (
+                yield from self._yield_error_chunk(
                     f"Backend request timed out after {self.config.BACKEND_READ_TIMEOUT}s.\n\n"
-                    f"Backend: {self.config.BACKEND_TYPE} at {backend_endpoint}\n"
-                    f"Model: {self.config.BACKEND_MODEL}\n\n"
+                    f"Backend: {self.config.BACKEND_TYPE}\n"
                     f"Try: Increase BACKEND_READ_TIMEOUT or use a faster model"
                 )
-                error_chunk = {
-                    "id": f"chatcmpl-{int(time.time())}",
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": self.model_name,
-                    "choices": [{"index": 0, "delta": {"content": error_content}, "finish_reason": "error"}],
-                }
-                yield f"data: {json.dumps(error_chunk)}\n\n"
-                yield "data: [DONE]\n\n"
                 return
-            except requests.ConnectionError as e:
-                backend_endpoint = (
-                    self.config.LMSTUDIO_ENDPOINT
-                    if self.config.BACKEND_TYPE == "lmstudio"
-                    else self.config.OLLAMA_ENDPOINT
-                )
-                error_content = (
+            except requests.ConnectionError:
+                yield from self._yield_error_chunk(
                     f"Could not connect to {self.config.BACKEND_TYPE} backend.\n\n"
-                    f"Endpoint: {backend_endpoint}\n"
-                    f"Error: {type(e).__name__}\n\n"
                     f"Ensure {self.config.BACKEND_TYPE} is running and accessible"
                 )
-                error_chunk = {
-                    "id": f"chatcmpl-{int(time.time())}",
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": self.model_name,
-                    "choices": [{"index": 0, "delta": {"content": error_content}, "finish_reason": "error"}],
-                }
-                yield f"data: {json.dumps(error_chunk)}\n\n"
-                yield "data: [DONE]\n\n"
                 return
 
-            # Extract message and tool calls based on backend
-            if self.config.BACKEND_TYPE == "ollama":
-                message = response_data.get("message", {})
-                tool_calls = message.get("tool_calls", [])
-            else:  # LM Studio
-                choice = response_data.get("choices", [{}])[0]
-                message = choice.get("message", {})
-                tool_calls = message.get("tool_calls", [])
+            # Extract message and tool calls from response
+            message, tool_calls = self._extract_message_and_tool_calls(response_data)
 
             if not tool_calls:
-                # No tool calls, stream the final response
-                content = message.get("content", "")
-                tokens = re.split(r"(\s+)", content)
-
-                for token in tokens:
-                    if token:
-                        chunk = {
-                            "id": f"chatcmpl-{int(time.time())}",
-                            "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": self.model_name,
-                            "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}],
-                        }
-                        yield f"data: {json.dumps(chunk)}\n\n"
-
-                # Final chunk
-                final_chunk = {
-                    "id": f"chatcmpl-{int(time.time())}",
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": self.model_name,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                }
-                yield f"data: {json.dumps(final_chunk)}\n\n"
-                yield "data: [DONE]\n\n"
+                # No tool calls - use true streaming for final response
+                yield from self._stream_from_backend(full_messages, temperature)
                 return
 
-            # Tool calls present - execute them
+            # Execute tool calls and append results (tools_used not tracked in streaming)
             full_messages.append(message)
-
-            # Execute each tool
-            for tool_call in tool_calls:
-                function = tool_call.get("function", {})
-                tool_name = function.get("name")
-
-                if self.config.BACKEND_TYPE == "lmstudio":
-                    tool_args = json.loads(function.get("arguments", "{}"))
-                else:
-                    tool_args = function.get("arguments", {})
-
-                tool_result = self.execute_tool(tool_name, tool_args)
-
-                # Add tool result
-                if self.config.BACKEND_TYPE == "lmstudio":
-                    full_messages.append({"role": "tool", "tool_call_id": tool_call.get("id"), "content": tool_result})
-                else:
-                    full_messages.append({"role": "tool", "content": tool_result})
+            tool_results = self._execute_tool_calls(tool_calls, [])
+            full_messages.extend(tool_results)
 
         # Max iterations reached
         self.logger.warning(f"[TOOL LOOP] MAX ITERATIONS REACHED ({max_iterations}) in streaming mode")
-        error_chunk = {
-            "id": f"chatcmpl-{int(time.time())}",
-            "object": "chat.completion.chunk",
-            "created": int(time.time()),
-            "model": self.model_name,
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {
-                        "content": "I apologize, but I've reached the maximum number of tool calling iterations."
-                    },
-                    "finish_reason": "length",
-                }
-            ],
-        }
-        yield f"data: {json.dumps(error_chunk)}\n\n"
-        yield "data: [DONE]\n\n"
+        yield from self._yield_error_chunk(
+            "I apologize, but I've reached the maximum number of tool calling iterations."
+        )
 
     def health(self):
         """Health check endpoint."""
@@ -514,6 +594,7 @@ class LLMServer:
 
     def chat_completions(self):
         """Handle chat completion requests."""
+        start_time = time.time()
         try:
             data = request.get_json()
 
@@ -535,6 +616,8 @@ class LLMServer:
             temperature = data.get("temperature", self.config.DEFAULT_TEMPERATURE)
             stream = data.get("stream", False)
 
+            self.logger.info(f"Request: {len(messages)} messages, stream={stream}, temp={temperature}")
+
             if stream:
                 return Response(
                     stream_with_context(self.stream_chat_response(messages, temperature)),
@@ -544,6 +627,9 @@ class LLMServer:
             else:
                 result = self.process_chat_completion(messages, temperature)
                 result["model"] = self.model_name
+                duration = time.time() - start_time
+                tools_used = result.get("tools_used", [])
+                self.logger.info(f"Completed in {duration:.2f}s, tools={tools_used}")
                 return jsonify(result)
 
         except Exception as e:

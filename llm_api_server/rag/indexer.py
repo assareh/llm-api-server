@@ -525,7 +525,7 @@ class DocSearchIndex:
 
     def _get_page_cache_path(self, url: str) -> Path:
         """Get cache file path for a URL."""
-        url_hash = hashlib.md5(url.encode()).hexdigest()
+        url_hash = hashlib.sha256(url.encode()).hexdigest()[:32]
         return self.content_dir / f"{url_hash}.json"
 
     def _load_cached_page(self, url: str, lastmod: str | None) -> dict[str, Any] | None:
@@ -706,7 +706,7 @@ class DocSearchIndex:
         logger.info(f"[RAG] Building BM25 keyword retriever from {len(self.chunks)} chunks...")
         start = time.time()
         self.bm25_retriever = BM25Retriever.from_documents(self.chunks)
-        self.bm25_retriever.k = self.config.search_top_k * 3  # Get more candidates for ensemble
+        self.bm25_retriever.k = self.config.search_top_k * self.config.retriever_candidate_multiplier  # Get more candidates for ensemble
         logger.info(f"[RAG] ✓ BM25 retriever built in {time.time() - start:.1f}s")
 
         # Build ensemble retriever (hybrid search)
@@ -717,7 +717,7 @@ class DocSearchIndex:
         self.ensemble_retriever = EnsembleRetriever(
             retrievers=[
                 self.bm25_retriever,
-                self.vectorstore.as_retriever(search_kwargs={"k": self.config.search_top_k * 3}),
+                self.vectorstore.as_retriever(search_kwargs={"k": self.config.search_top_k * self.config.retriever_candidate_multiplier}),
             ],
             weights=[self.config.hybrid_bm25_weight, self.config.hybrid_semantic_weight],
         )
@@ -791,7 +791,7 @@ class DocSearchIndex:
         logger.info(f"[RAG] Rebuilding BM25 retriever with all {len(self.chunks)} chunks...")
         start = time.time()
         self.bm25_retriever = BM25Retriever.from_documents(self.chunks)
-        self.bm25_retriever.k = self.config.search_top_k * 3
+        self.bm25_retriever.k = self.config.search_top_k * self.config.retriever_candidate_multiplier
         logger.info(f"[RAG] ✓ BM25 retriever rebuilt in {time.time() - start:.1f}s")
 
         # Rebuild ensemble retriever
@@ -799,7 +799,7 @@ class DocSearchIndex:
         self.ensemble_retriever = EnsembleRetriever(
             retrievers=[
                 self.bm25_retriever,
-                self.vectorstore.as_retriever(search_kwargs={"k": self.config.search_top_k * 3}),
+                self.vectorstore.as_retriever(search_kwargs={"k": self.config.search_top_k * self.config.retriever_candidate_multiplier}),
             ],
             weights=[self.config.hybrid_bm25_weight, self.config.hybrid_semantic_weight],
         )

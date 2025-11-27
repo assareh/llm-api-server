@@ -134,11 +134,10 @@ def create_web_search_tool(config: "ServerConfig") -> Tool:
     This tool requires the optional 'websearch' dependency.
     Install with: uv sync --extra websearch
 
-    The tool will try Ollama web search API first (if OLLAMA_API_KEY is configured),
-    then fall back to DuckDuckGo search.
+    Uses Ollama web search API. Requires OLLAMA_API_KEY to be configured.
 
     Args:
-        config: ServerConfig instance with OLLAMA_API_KEY (optional)
+        config: ServerConfig instance with OLLAMA_API_KEY
 
     Returns:
         LangChain Tool for web search

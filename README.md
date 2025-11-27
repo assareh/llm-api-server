@@ -15,7 +15,7 @@ A reusable Flask server providing an OpenAI-compatible API for local LLM backend
   - Full markdown-formatted responses (no truncation)
   - Collapsible long responses with syntax highlighting
   - Professional styling for code, tables, and lists
-- **Built-in tools** - Web search with Ollama API + DuckDuckGo fallback
+- **Built-in tools** - Date/time, calculator, and web search (via Ollama API)
 - **WebUI integration** - Optional Open Web UI frontend
 - **Smart caching** - System prompt auto-reload on file changes
 - **Debug logging** - Comprehensive tool execution logging
@@ -164,10 +164,9 @@ server = LLMServer(
 - **`calculate(expression: str)`** - Safely evaluates mathematical expressions
   - Supports: `+`, `-`, `*`, `/`, `//`, `%`, `**` (power)
   - Example: `calculate("2 + 3 * 4")` → `"14"`
-- **`create_web_search_tool(config)`** - Web search with Ollama API and DuckDuckGo fallback
+- **`create_web_search_tool(config)`** - Web search using Ollama API
   - Requires optional `websearch` dependency: `uv sync --extra websearch`
-  - Tries Ollama web search API first (if `OLLAMA_API_KEY` is set)
-  - Falls back to DuckDuckGo if API unavailable or rate-limited
+  - Requires `OLLAMA_API_KEY` to be configured
   - Parameters: `query`, `max_results` (default 10), `site` (optional filter)
 
 ## RAG Module (Document Search)

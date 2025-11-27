@@ -1,5 +1,7 @@
 """LLM API Server - A reusable Flask server for LLM backends with tool calling."""
 
+from importlib.metadata import version
+
 from .builtin_tools import (
     BUILTIN_TOOLS,
     calculate,
@@ -14,7 +16,7 @@ from .server import LLMServer
 # - Eval module: from llm_api_server.eval import Evaluator, TestCase, etc.
 # - RAG module: from llm_api_server.rag import DocSearchIndex, RAGConfig
 
-__version__ = "0.4.1"
+__version__ = version("llm-api-server")
 __all__ = [
     "BUILTIN_TOOLS",
     "LLMServer",

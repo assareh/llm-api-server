@@ -90,7 +90,7 @@ llm-api-server/
 2. **Backends** (`backends.py`): Ollama/LM Studio communication
 3. **Config** (`config.py`): Configuration and environment loading
 4. **Built-in tools** (`builtin_tools.py`): Common tools (date, calculate, web search factory)
-5. **Web search** (`web_search_tool.py`): Ollama API + DuckDuckGo fallback implementation
+5. **Web search** (`web_search_tool.py`): Ollama API web search implementation
 6. **Web UI** (`webui.py`): Open Web UI subprocess management
 
 ### Adding Features
@@ -187,6 +187,12 @@ class MyConfig(ServerConfig):
 
 config = ServerConfig.from_env("MYAPP_")
 ```
+
+**Key configuration options:**
+- `MAX_TOOL_ITERATIONS`: Maximum tool calling loop iterations (default: 5)
+- `RATE_LIMIT_ENABLED`: Enable API rate limiting (default: False)
+- `RATE_LIMIT_DEFAULT`: Rate limit string, e.g., "100 per minute"
+- `RATE_LIMIT_STORAGE_URI`: Storage backend for rate limiting (default: "memory://")
 
 ### Backend Support
 - **Ollama**: Native Ollama API format
@@ -340,5 +346,5 @@ When making changes, test in both projects.
 
 ---
 
-*Last updated: 2024-11-25*
-*Version: 0.4.0*
+*Last updated: 2025-11-26*
+*Version: 0.4.1*

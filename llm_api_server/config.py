@@ -26,6 +26,7 @@ class ServerConfig:
     DEFAULT_TEMPERATURE: float = 0.0
     SYSTEM_PROMPT_PATH: str = "system_prompt.md"
     THREADED: bool = True  # Enable threaded mode for concurrent requests
+    MAX_TOOL_ITERATIONS: int = 5  # Maximum tool calling loop iterations per request
 
     # Model name advertised via API
     MODEL_NAME: str = "llm-server/default"
@@ -51,6 +52,11 @@ class ServerConfig:
     # Retry settings for backend calls
     BACKEND_RETRY_ATTEMPTS: int = 3  # Number of retry attempts for connection errors
     BACKEND_RETRY_INITIAL_DELAY: float = 1.0  # Initial delay in seconds (doubles each retry)
+
+    # Rate limiting (requires flask-limiter: pip install flask-limiter)
+    RATE_LIMIT_ENABLED: bool = False  # Enable rate limiting on API endpoints
+    RATE_LIMIT_DEFAULT: str = "100 per minute"  # Default rate limit (flask-limiter format)
+    RATE_LIMIT_STORAGE_URI: str = "memory://"  # Storage backend (memory://, redis://localhost:6379, etc.)
 
     # Custom prompt suggestions for WebUI (list of dicts with title and content)
     DEFAULT_PROMPT_SUGGESTIONS: list | None = None
@@ -105,5 +111,9 @@ class ServerConfig:
         config.BACKEND_RETRY_INITIAL_DELAY = float(
             get_env("BACKEND_RETRY_INITIAL_DELAY", str(cls.BACKEND_RETRY_INITIAL_DELAY))
         )
+        config.RATE_LIMIT_ENABLED = get_env("RATE_LIMIT_ENABLED", "").lower() in ("true", "1", "yes")
+        config.RATE_LIMIT_DEFAULT = get_env("RATE_LIMIT_DEFAULT", cls.RATE_LIMIT_DEFAULT)
+        config.RATE_LIMIT_STORAGE_URI = get_env("RATE_LIMIT_STORAGE_URI", cls.RATE_LIMIT_STORAGE_URI)
+        config.MAX_TOOL_ITERATIONS = int(get_env("MAX_TOOL_ITERATIONS", str(cls.MAX_TOOL_ITERATIONS)))
 
         return config

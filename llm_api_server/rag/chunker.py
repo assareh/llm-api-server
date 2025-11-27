@@ -46,6 +46,9 @@ BOILERPLATE_SELECTORS = [
     'a[class*="edit"]',
 ]
 
+# Minimum content length (characters) to create a chunk - skip tiny fragments
+MIN_CONTENT_LENGTH = 20
+
 
 @dataclass
 class ChunkMetadata:
@@ -239,7 +242,7 @@ def _finalize_section(
 
     # Add content blocks (paragraphs, lists, etc.)
     for content in section.get("content_blocks", []):
-        if content and len(content.strip()) > 20:  # Skip tiny fragments
+        if content and len(content.strip()) > MIN_CONTENT_LENGTH:
             all_text_parts.append(content.strip())
 
     # Add code blocks with markdown formatting
@@ -570,7 +573,7 @@ def _generate_chunk_id(canonical_url: str, heading_path: list[str], sub_idx: Any
     """Generate stable chunk ID from URL, heading path, and sub-index."""
     path_str = " > ".join(heading_path) if heading_path else "root"
     combined = f"{canonical_url}||{path_str}::{sub_idx}"
-    return hashlib.sha1(combined.encode()).hexdigest()[:16]
+    return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
 
 def _canonicalize_url(url: str) -> str:

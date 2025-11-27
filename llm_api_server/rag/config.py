@@ -70,6 +70,7 @@ class RAGConfig:
     hybrid_bm25_weight: float = 0.3
     hybrid_semantic_weight: float = 0.7
     search_top_k: int = 5
+    retriever_candidate_multiplier: int = 3  # Multiplier for initial retrieval candidates (search_top_k * this)
     rerank_enabled: bool = True
     rerank_top_k: int = 80
 
