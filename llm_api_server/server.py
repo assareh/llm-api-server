@@ -202,9 +202,13 @@ class LLMServer:
         system_prompt = self.get_system_prompt()
         full_messages = [{"role": "system", "content": system_prompt}] + messages
 
+        # Track tools used during this request
+        tools_used: list[str] = []
+
         iteration = 0
         while iteration < max_iterations:
             iteration += 1
+            self.logger.debug(f"[TOOL LOOP] Iteration {iteration}/{max_iterations}")
 
             # Call the backend with timeout handling
             try:
@@ -293,12 +297,16 @@ class LLMServer:
                             }
                         ],
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                        "tools_used": tools_used,
                     }
 
                 full_messages.append(message)
                 for tool_call in tool_calls:
                     function = tool_call.get("function", {})
-                    tool_result = self.execute_tool(function.get("name"), function.get("arguments", {}))
+                    tool_name = function.get("name")
+                    if tool_name:
+                        tools_used.append(tool_name)
+                    tool_result = self.execute_tool(tool_name, function.get("arguments", {}))
                     full_messages.append({"role": "tool", "content": tool_result})
 
             else:  # LM Studio (OpenAI format)
@@ -308,16 +316,21 @@ class LLMServer:
 
                 if not tool_calls:
                     response_data["model"] = self.model_name
+                    response_data["tools_used"] = tools_used
                     return response_data
 
                 full_messages.append(message)
                 for tool_call in tool_calls:
                     function = tool_call.get("function", {})
+                    tool_name = function.get("name")
+                    if tool_name:
+                        tools_used.append(tool_name)
                     tool_args = json.loads(function.get("arguments", "{}"))
-                    tool_result = self.execute_tool(function.get("name"), tool_args)
+                    tool_result = self.execute_tool(tool_name, tool_args)
                     full_messages.append({"role": "tool", "tool_call_id": tool_call.get("id"), "content": tool_result})
 
         # Max iterations reached
+        self.logger.warning(f"[TOOL LOOP] MAX ITERATIONS REACHED ({max_iterations}). Tools used: {tools_used}")
         return {
             "id": f"chatcmpl-{int(time.time())}",
             "object": "chat.completion",
@@ -334,6 +347,7 @@ class LLMServer:
                 }
             ],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "tools_used": tools_used,
         }
 
     def stream_chat_response(
@@ -346,6 +360,7 @@ class LLMServer:
         iteration = 0
         while iteration < max_iterations:
             iteration += 1
+            self.logger.debug(f"[TOOL LOOP] Iteration {iteration}/{max_iterations}")
 
             # Call backend with timeout handling
             try:
@@ -455,6 +470,7 @@ class LLMServer:
                     full_messages.append({"role": "tool", "content": tool_result})
 
         # Max iterations reached
+        self.logger.warning(f"[TOOL LOOP] MAX ITERATIONS REACHED ({max_iterations}) in streaming mode")
         error_chunk = {
             "id": f"chatcmpl-{int(time.time())}",
             "object": "chat.completion.chunk",

@@ -33,7 +33,7 @@ dependencies = [
 
 [project.optional-dependencies]
 webui = ["open-webui"]
-websearch = ["duckduckgo-search>=5.0.0"]
+websearch = []  # No additional deps - uses Ollama API (requires OLLAMA_API_KEY)
 eval = ["markdown>=3.5.0"]
 rag = [
     "langchain>=0.3.0",

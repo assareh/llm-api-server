@@ -80,6 +80,14 @@ class HTMLReporter:
                 issues_list = "".join(f"<li>{html.escape(issue)}</li>" for issue in result.issues)
                 issues_html = f'<div class="issues"><ul>{issues_list}</ul></div>'
 
+            # Build tools used display
+            if result.tools_used:
+                tools_html = "".join(
+                    f'<span class="tool-badge">{html.escape(tool)}</span>' for tool in result.tools_used
+                )
+            else:
+                tools_html = '<span class="no-tools">None</span>'
+
             # Format response (convert markdown to HTML if available)
             if result.response:
                 if HAS_MARKDOWN:
@@ -118,6 +126,7 @@ class HTMLReporter:
                     <span class="question">{html.escape(result.test_case.question)}</span>
                 </td>
                 <td>{result.response_time:.2f}s</td>
+                <td><div class="tools-container">{tools_html}</div></td>
                 <td>
                     <div class="response-container">{response_display}</div>
                     {issues_html}
@@ -377,6 +386,26 @@ class HTMLReporter:
             margin: 5px 0;
             color: #92400e;
         }}
+        .tools-container {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }}
+        .tool-badge {{
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }}
+        .no-tools {{
+            color: #9ca3af;
+            font-size: 12px;
+            font-style: italic;
+        }}
         footer {{
             padding: 20px 30px;
             background: #f9fafb;
@@ -426,8 +455,9 @@ class HTMLReporter:
                 <tr>
                     <th style="width: 50px;">#</th>
                     <th style="width: 50px;">Status</th>
-                    <th style="width: 30%;">Test</th>
-                    <th style="width: 100px;">Time</th>
+                    <th style="width: 25%;">Test</th>
+                    <th style="width: 80px;">Time</th>
+                    <th style="width: 150px;">Tools Used</th>
                     <th>Response & Issues</th>
                 </tr>
             </thead>
@@ -500,6 +530,7 @@ class JSONReporter:
                     "response": r.response,
                     "issues": r.issues,
                     "error": r.error,
+                    "tools_used": r.tools_used,
                     "metadata": r.test_case.metadata,
                 }
                 for i, r in enumerate(results, 1)
@@ -540,6 +571,10 @@ class ConsoleReporter:
             print(f"Test {i}/{total}: {result.test_case.description}")
             print(f'Question: "{result.test_case.question}"')
             print(f"{status_color}{status}{reset} ({result.response_time:.2f}s)")
+
+            if result.tools_used:
+                tools_str = ", ".join(result.tools_used)
+                print(f"  Tools: {tools_str}")
 
             if result.error:
                 print(f"  Error: {result.error}")

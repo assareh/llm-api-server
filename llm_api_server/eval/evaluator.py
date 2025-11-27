@@ -40,7 +40,7 @@ class Evaluator:
         except requests.RequestException:
             return False
 
-    def send_question(self, question: str, timeout: int = 120) -> tuple[str | None, float, str | None]:
+    def send_question(self, question: str, timeout: int = 120) -> tuple[str | None, float, str | None, list[str]]:
         """Send a question to the LLM API.
 
         Args:
@@ -48,7 +48,7 @@ class Evaluator:
             timeout: Request timeout in seconds
 
         Returns:
-            Tuple of (response_text, response_time_seconds, error_message)
+            Tuple of (response_text, response_time_seconds, error_message, tools_used)
         """
         try:
             start_time = time.time()
@@ -70,22 +70,23 @@ class Evaluator:
             elapsed = time.time() - start_time
 
             if response.status_code != 200:
-                return None, elapsed, f"HTTP {response.status_code}: {response.text}"
+                return None, elapsed, f"HTTP {response.status_code}: {response.text}", []
 
             data = response.json()
             content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            tools_used = data.get("tools_used", [])
 
             if not content:
-                return None, elapsed, "Empty response from API"
+                return None, elapsed, "Empty response from API", tools_used
 
-            return content, elapsed, None
+            return content, elapsed, None, tools_used
 
         except requests.Timeout:
-            return None, timeout, "Request timeout"
+            return None, timeout, "Request timeout", []
         except requests.RequestException as e:
-            return None, 0, f"Request error: {e!s}"
+            return None, 0, f"Request error: {e!s}", []
         except (json.JSONDecodeError, KeyError) as e:
-            return None, 0, f"Response parsing error: {e!s}"
+            return None, 0, f"Response parsing error: {e!s}", []
 
     def run_test(self, test_case: TestCase) -> TestResult:
         """Run a single test case.
@@ -97,19 +98,29 @@ class Evaluator:
             TestResult with pass/fail status and details
         """
         # Send question
-        response, response_time, error = self.send_question(test_case.question, test_case.timeout)
+        response, response_time, error, tools_used = self.send_question(test_case.question, test_case.timeout)
 
         # Handle errors
         if error:
             return TestResult(
-                test_case=test_case, passed=False, response=response, response_time=response_time, error=error
+                test_case=test_case,
+                passed=False,
+                response=response,
+                response_time=response_time,
+                error=error,
+                tools_used=tools_used,
             )
 
         # Validate response
         passed, issues = validate_response(test_case, response)
 
         return TestResult(
-            test_case=test_case, passed=passed, response=response, response_time=response_time, issues=issues
+            test_case=test_case,
+            passed=passed,
+            response=response,
+            response_time=response_time,
+            issues=issues,
+            tools_used=tools_used,
         )
 
     def run_tests(self, test_cases: list[TestCase], stop_on_failure: bool = False) -> list[TestResult]:

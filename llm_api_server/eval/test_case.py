@@ -47,6 +47,7 @@ class TestResult:
         response_time: Time taken to get response in seconds
         issues: List of validation issues found
         error: Error message if request failed
+        tools_used: List of tool names that were called during the response
     """
 
     test_case: TestCase
@@ -55,3 +56,4 @@ class TestResult:
     response_time: float = 0.0
     issues: list[str] = field(default_factory=list)
     error: str | None = None
+    tools_used: list[str] = field(default_factory=list)

@@ -201,20 +201,35 @@ The framework provides reusable tools:
 - `get_current_datetime()` - Returns current date and time in local timezone
 - `calculate(expression)` - Safe mathematical expression evaluator
 
-**Optional (requires `--extra websearch`):**
-- `create_web_search_tool(config)` - Web search with dual strategy:
-  - Tries Ollama web search API if `OLLAMA_API_KEY` is configured
-  - Falls back to DuckDuckGo search (free, rate-limited)
+**Optional (requires `--extra websearch` and `OLLAMA_API_KEY`):**
+- `create_web_search_tool(config)` - Web search using Ollama API:
+  - Requires `OLLAMA_API_KEY` to be configured
   - Supports site filtering: `site:hashicorp.com query`
   - Implementation: `llm_api_server/web_search_tool.py`
 
+**Optional (requires `--extra rag`):**
+- `create_doc_search_tool(index, name, description)` - RAG document search tool:
+  - Wraps a `DocSearchIndex` for LLM tool calling
+  - Hybrid search (BM25 + semantic) with cross-encoder re-ranking
+  - Returns formatted results with source URLs and parent context
+  - Customizable tool name and description per use case
+  - Implementation: `llm_api_server/builtin_tools.py`
+
 **Usage:**
 ```python
-from llm_api_server import BUILTIN_TOOLS, create_web_search_tool
+from llm_api_server import BUILTIN_TOOLS, create_web_search_tool, create_doc_search_tool
+from llm_api_server.rag import DocSearchIndex, RAGConfig
 
 # With web search
 web_search = create_web_search_tool(config)
-tools = BUILTIN_TOOLS + [web_search]
+
+# With RAG doc search
+rag_config = RAGConfig(base_url="https://docs.example.com", cache_dir="./doc_index")
+index = DocSearchIndex(rag_config)
+index.crawl_and_index()
+doc_search = create_doc_search_tool(index, description="Search Example docs")
+
+tools = BUILTIN_TOOLS + [web_search, doc_search]
 ```
 
 ### Evaluation Framework

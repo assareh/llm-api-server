@@ -2593,9 +2593,6 @@ rag = [
     { name = "sentence-transformers" },
     { name = "tiktoken" },
 ]
-websearch = [
-    { name = "duckduckgo-search" },
-]
 webui = [
     { name = "open-webui" },
 ]
@@ -2605,7 +2602,6 @@ requires-dist = [
     { name = "beautifulsoup4", marker = "extra == 'rag'", specifier = ">=4.12.0" },
     { name = "black", marker = "extra == 'dev'" },
     { name = "click", specifier = ">=8.1.0" },
-    { name = "duckduckgo-search", marker = "extra == 'websearch'", specifier = ">=5.0.0" },
     { name = "faiss-cpu", marker = "extra == 'rag'", specifier = ">=1.8.0" },
     { name = "flask", specifier = ">=3.0.0" },
     { name = "flask-cors", specifier = ">=4.0.0" },

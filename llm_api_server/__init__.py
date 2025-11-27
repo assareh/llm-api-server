@@ -3,6 +3,7 @@
 from .builtin_tools import (
     BUILTIN_TOOLS,
     calculate,
+    create_doc_search_tool,
     create_web_search_tool,
     get_current_datetime,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "LLMServer",
     "ServerConfig",
     "calculate",
+    "create_doc_search_tool",
     "create_web_search_tool",
     "get_current_datetime",
 ]
