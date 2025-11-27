@@ -32,13 +32,6 @@ from .crawler import DocumentCrawler
 
 logger = logging.getLogger(__name__)
 
-# Suppress noisy "ruthless removal did not work" messages from readability library
-logging.getLogger("readability.readability").setLevel(logging.WARNING)
-
-# Disable tokenizers parallelism to prevent fork-related warnings when using WebUI
-# This is safe because we use ThreadPoolExecutor for parallel operations instead
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
 
 class DocSearchIndex:
     """Main document search index with crawling, chunking, embedding, and hybrid search."""
@@ -46,12 +39,24 @@ class DocSearchIndex:
     # Index version for cache invalidation
     INDEX_VERSION = "1.1.0-chunker-v2"
 
+    # Class-level flag to ensure global configuration is only set once
+    _global_config_applied = False
+
     def __init__(self, config: RAGConfig):
         """Initialize the document search index.
 
         Args:
             config: RAG configuration
         """
+        # Apply global configuration once per process
+        if not DocSearchIndex._global_config_applied:
+            # Suppress noisy "ruthless removal did not work" messages from readability library
+            logging.getLogger("readability.readability").setLevel(logging.WARNING)
+            # Disable tokenizers parallelism to prevent fork-related warnings when using WebUI
+            # This is safe because we use ThreadPoolExecutor for parallel operations instead
+            os.environ["TOKENIZERS_PARALLELISM"] = "false"
+            DocSearchIndex._global_config_applied = True
+
         self.config = config
 
         # Create cache directories
@@ -486,7 +491,7 @@ class DocSearchIndex:
                     logger.error(f"[RAG] Failed to fetch {url}: {e}")
                     self._track_url_failure(url, failed_urls, str(e))
 
-        if cache_hits > 0:
+        if cache_hits > 0 and len(pages) > 0:
             logger.info(f"[RAG] Cache hits: {cache_hits}/{len(pages)} ({100*cache_hits/len(pages):.1f}%)")
 
         return pages, failed_urls
@@ -528,6 +533,10 @@ class DocSearchIndex:
     def _extract_main_content(self, html: str, url: str) -> str:
         """Extract main content from HTML using readability.
 
+        Uses readability to extract the main content, but falls back to the original
+        HTML if readability strips too much content (>30% loss) or removes code blocks.
+        This protects technical documentation from being over-simplified.
+
         Args:
             html: Raw HTML content
             url: Page URL (used by readability for context)
@@ -536,8 +545,29 @@ class DocSearchIndex:
             Cleaned HTML with just the main content
         """
         try:
+            # Count code blocks in original HTML
+            original_code_blocks = html.lower().count("<pre") + html.lower().count("<code")
+
             doc = ReadabilityDocument(html, url=url)
             clean_html = doc.summary()
+
+            # Check for excessive content loss (>30%)
+            if len(clean_html) < len(html) * 0.3:
+                logger.warning(
+                    f"[RAG] Readability removed >70% of content from {url}, using original HTML "
+                    f"(original: {len(html)}, clean: {len(clean_html)})"
+                )
+                return html
+
+            # Check if code blocks were stripped
+            clean_code_blocks = clean_html.lower().count("<pre") + clean_html.lower().count("<code")
+            if original_code_blocks > 0 and clean_code_blocks < original_code_blocks * 0.5:
+                logger.warning(
+                    f"[RAG] Readability stripped code blocks from {url}, using original HTML "
+                    f"(original: {original_code_blocks}, clean: {clean_code_blocks})"
+                )
+                return html
+
             logger.debug(f"[RAG] Extracted main content from {url}")
             return clean_html
         except Exception as e:
@@ -721,6 +751,69 @@ class DocSearchIndex:
             self.cross_encoder = CrossEncoder(self.config.rerank_model)
             logger.info(f"[RAG] ✓ Cross-encoder loaded in {time.time() - start:.1f}s")
 
+    def _compute_faiss_checksum(self, faiss_path: str) -> str:
+        """Compute SHA256 checksum of FAISS index files.
+
+        Args:
+            faiss_path: Path to FAISS index directory
+
+        Returns:
+            Hex-encoded SHA256 checksum of all index files
+        """
+        faiss_dir = Path(faiss_path)
+        hasher = hashlib.sha256()
+
+        # Hash all files in the FAISS directory in sorted order for consistency
+        for file_path in sorted(faiss_dir.glob("*")):
+            if file_path.is_file():
+                hasher.update(file_path.name.encode())
+                hasher.update(file_path.read_bytes())
+
+        return hasher.hexdigest()
+
+    def _save_faiss_checksum(self, faiss_path: str):
+        """Save checksum file for FAISS index.
+
+        Args:
+            faiss_path: Path to FAISS index directory
+        """
+        checksum = self._compute_faiss_checksum(faiss_path)
+        checksum_file = Path(faiss_path).parent / "faiss_index.sha256"
+        checksum_file.write_text(checksum)
+        logger.debug(f"[RAG] FAISS checksum saved: {checksum[:16]}...")
+
+    def _verify_faiss_checksum(self, faiss_path: str) -> bool:
+        """Verify FAISS index checksum before loading.
+
+        Args:
+            faiss_path: Path to FAISS index directory
+
+        Returns:
+            True if checksum matches or no checksum file exists (legacy), False if mismatch
+
+        Raises:
+            ValueError: If checksum verification fails (possible tampering)
+        """
+        checksum_file = Path(faiss_path).parent / "faiss_index.sha256"
+
+        if not checksum_file.exists():
+            # Legacy index without checksum - allow loading but warn
+            logger.warning("[RAG] No FAISS checksum file found (legacy index). Consider rebuilding.")
+            return True
+
+        expected = checksum_file.read_text().strip()
+        actual = self._compute_faiss_checksum(faiss_path)
+
+        if expected != actual:
+            raise ValueError(
+                f"FAISS index checksum mismatch - possible tampering detected. "
+                f"Expected: {expected[:16]}..., Got: {actual[:16]}... "
+                f"Delete the cache directory and rebuild the index."
+            )
+
+        logger.debug(f"[RAG] FAISS checksum verified: {actual[:16]}...")
+        return True
+
     def _build_retrievers(self):
         """Build FAISS vector store and hybrid retriever."""
         # Build FAISS index
@@ -730,10 +823,11 @@ class DocSearchIndex:
         self.vectorstore = FAISS.from_documents(self.chunks, self.embeddings)
         logger.info(f"[RAG] ✓ FAISS index built in {time.time() - start:.1f}s")
 
-        # Save FAISS index
+        # Save FAISS index with checksum
         faiss_path = str(self.index_dir / "faiss_index")
         logger.info(f"[RAG] Saving FAISS index to {faiss_path}...")
         self.vectorstore.save_local(faiss_path)
+        self._save_faiss_checksum(faiss_path)
         logger.info("[RAG] ✓ FAISS index saved")
 
         # Build BM25 retriever
@@ -793,13 +887,16 @@ class DocSearchIndex:
         logger.info("[RAG] Initializing ML models (embeddings, re-rankers)...")
         self._initialize_components()
 
-        # Load existing FAISS index
+        # Load existing FAISS index with checksum verification
         faiss_path = str(self.index_dir / "faiss_index")
         try:
+            # Verify checksum before loading (raises ValueError if tampered)
+            self._verify_faiss_checksum(faiss_path)
+
             logger.info(f"[RAG] Loading existing FAISS index from {faiss_path}...")
             start = time.time()
             self.vectorstore = FAISS.load_local(
-                faiss_path, self.embeddings, allow_dangerous_deserialization=True  # Safe for our own indexes
+                faiss_path, self.embeddings, allow_dangerous_deserialization=True  # Checksum verified above
             )
             logger.info(
                 f"[RAG] ✓ Loaded existing index with {existing_chunk_count} chunks in {time.time() - start:.1f}s"
@@ -814,9 +911,10 @@ class DocSearchIndex:
             self.vectorstore.add_documents(new_chunks)
             logger.info(f"[RAG] ✓ Added {len(new_chunks)} new chunks in {time.time() - start:.1f}s")
 
-            # Save updated index
+            # Save updated index with new checksum
             logger.info(f"[RAG] Saving updated FAISS index to {faiss_path}...")
             self.vectorstore.save_local(faiss_path)
+            self._save_faiss_checksum(faiss_path)
             logger.info("[RAG] ✓ Updated FAISS index saved")
 
         except Exception as e:

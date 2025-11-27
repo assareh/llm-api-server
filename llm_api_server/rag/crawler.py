@@ -408,6 +408,13 @@ class DocumentCrawler:
 
             logger.debug(f"[CRAWLER] Fetching: {url}")
             response = requests.get(url, headers={"User-Agent": self.user_agent}, timeout=self.request_timeout)
+
+            # Verify final URL is still within base domain (blocks redirects to external sites)
+            final_url = response.url
+            if not final_url.startswith(self.base_url):
+                logger.warning(f"[CRAWLER] Redirect to external domain blocked: {url} -> {final_url}")
+                return None
+
             response.raise_for_status()
 
             # Only process HTML content

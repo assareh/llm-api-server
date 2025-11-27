@@ -1,6 +1,5 @@
 """Tests for ServerConfig configuration loading."""
 
-
 import pytest
 
 from llm_api_server.config import ServerConfig

@@ -36,6 +36,7 @@ class RAGConfig:
             With defaults (0.3/0.7), semantic ranks are weighted ~2.3x more than BM25.
         search_top_k: Default number of results to return (default: 5)
         rerank_enabled: Enable cross-encoder re-ranking (default: True)
+        parent_context_max_chars: Max characters for parent context in tool results (default: 500, 0=no limit)
 
         # Model settings
         embedding_model: HuggingFace embedding model name
@@ -73,6 +74,7 @@ class RAGConfig:
     search_top_k: int = 5
     retriever_candidate_multiplier: int = 3  # Multiplier for initial retrieval candidates (search_top_k * this)
     rerank_enabled: bool = True
+    parent_context_max_chars: int = 500  # Max chars for parent context in tool results (0 = no limit)
 
     # Model settings
     embedding_model: str = "all-MiniLM-L6-v2"

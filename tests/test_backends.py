@@ -8,22 +8,36 @@ import requests
 from llm_api_server.backends import check_lmstudio_health, check_ollama_health
 
 
+@pytest.fixture(autouse=True)
+def reset_backend_session():
+    """Reset the module-level session between tests to ensure mocking works."""
+    import llm_api_server.backends as backends_module
+
+    original_session = backends_module._session
+    backends_module._session = None
+    yield
+    backends_module._session = original_session
+
+
 @pytest.mark.unit
 class TestBackendHealthChecks:
     """Test backend health check functions."""
 
-    def test_ollama_health_success(self, default_config):
-        """Test successful Ollama health check."""
+    def test_ollama_health_model_not_found(self, default_config):
+        """Test Ollama health check when configured model is not available."""
         mock_response = Mock()
         mock_response.json.return_value = {
             "models": [
-                {"name": "openai/gpt-oss-20b"},
                 {"name": "llama2"},
+                {"name": "mistral"},
             ]
         }
         mock_response.raise_for_status = Mock()
 
-        with patch("llm_api_server.backends.requests.get", return_value=mock_response):
+        mock_session = Mock()
+        mock_session.get.return_value = mock_response
+
+        with patch("llm_api_server.backends._get_session", return_value=mock_session):
             is_healthy, message = check_ollama_health(default_config)
 
         assert is_healthy is False  # Model not in list
@@ -40,7 +54,10 @@ class TestBackendHealthChecks:
         }
         mock_response.raise_for_status = Mock()
 
-        with patch("llm_api_server.backends.requests.get", return_value=mock_response):
+        mock_session = Mock()
+        mock_session.get.return_value = mock_response
+
+        with patch("llm_api_server.backends._get_session", return_value=mock_session):
             is_healthy, message = check_ollama_health(custom_config)
 
         assert is_healthy is True
@@ -49,7 +66,10 @@ class TestBackendHealthChecks:
 
     def test_ollama_health_connection_error(self, default_config):
         """Test Ollama health check with connection error."""
-        with patch("llm_api_server.backends.requests.get", side_effect=requests.ConnectionError("Connection refused")):
+        mock_session = Mock()
+        mock_session.get.side_effect = requests.ConnectionError("Connection refused")
+
+        with patch("llm_api_server.backends._get_session", return_value=mock_session):
             is_healthy, message = check_ollama_health(default_config)
 
         assert is_healthy is False
@@ -58,7 +78,10 @@ class TestBackendHealthChecks:
 
     def test_ollama_health_timeout(self, default_config):
         """Test Ollama health check with timeout."""
-        with patch("llm_api_server.backends.requests.get", side_effect=requests.Timeout):
+        mock_session = Mock()
+        mock_session.get.side_effect = requests.Timeout
+
+        with patch("llm_api_server.backends._get_session", return_value=mock_session):
             is_healthy, message = check_ollama_health(default_config)
 
         assert is_healthy is False
@@ -75,7 +98,10 @@ class TestBackendHealthChecks:
         }
         mock_response.raise_for_status = Mock()
 
-        with patch("llm_api_server.backends.requests.get", return_value=mock_response):
+        mock_session = Mock()
+        mock_session.get.return_value = mock_response
+
+        with patch("llm_api_server.backends._get_session", return_value=mock_session):
             is_healthy, message = check_lmstudio_health(default_config)
 
         assert is_healthy is True
@@ -87,7 +113,10 @@ class TestBackendHealthChecks:
         mock_response.json.return_value = {"data": []}
         mock_response.raise_for_status = Mock()
 
-        with patch("llm_api_server.backends.requests.get", return_value=mock_response):
+        mock_session = Mock()
+        mock_session.get.return_value = mock_response
+
+        with patch("llm_api_server.backends._get_session", return_value=mock_session):
             is_healthy, message = check_lmstudio_health(default_config)
 
         assert is_healthy is False
@@ -95,7 +124,10 @@ class TestBackendHealthChecks:
 
     def test_lmstudio_health_connection_error(self, default_config):
         """Test LM Studio health check with connection error."""
-        with patch("llm_api_server.backends.requests.get", side_effect=requests.ConnectionError):
+        mock_session = Mock()
+        mock_session.get.side_effect = requests.ConnectionError
+
+        with patch("llm_api_server.backends._get_session", return_value=mock_session):
             is_healthy, message = check_lmstudio_health(default_config)
 
         assert is_healthy is False
@@ -152,9 +184,8 @@ class TestRetryLogic:
 
         mock_func = Mock(side_effect=requests.ConnectionError("Always fails"))
 
-        with patch("time.sleep"):  # Skip actual sleep delays
-            with pytest.raises(requests.ConnectionError):
-                _retry_on_connection_error(mock_func, default_config)
+        with patch("time.sleep"), pytest.raises(requests.ConnectionError):  # Skip actual sleep delays
+            _retry_on_connection_error(mock_func, default_config)
 
         # Should try 3 times (default BACKEND_RETRY_ATTEMPTS)
         assert mock_func.call_count == 3

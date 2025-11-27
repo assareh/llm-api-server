@@ -2,6 +2,7 @@
 
 import json
 import logging
+import threading
 import time
 import traceback
 from collections.abc import Callable, Generator
@@ -49,9 +50,10 @@ class LLMServer:
         self.default_system_prompt = default_system_prompt
         self.init_hook = init_hook
 
-        # System prompt caching
+        # System prompt caching with thread safety
         self._system_prompt_cache: str | None = None
         self._system_prompt_mtime: float | None = None
+        self._prompt_lock = threading.Lock()
 
         # WebUI process
         self._webui_process = None
@@ -128,24 +130,37 @@ class LLMServer:
         self.app.route("/v1/chat/completions", methods=["POST"])(self.chat_completions)
 
     def get_system_prompt(self) -> str:
-        """Load system prompt from markdown file with smart caching."""
+        """Load system prompt from markdown file with smart caching.
+
+        Thread-safe: uses lock to prevent race conditions when multiple
+        requests check and update the cache simultaneously.
+        """
         prompt_path = Path(self.config.SYSTEM_PROMPT_PATH)
 
         if not prompt_path.exists():
             return self.default_system_prompt
 
         try:
-            current_mtime = prompt_path.stat().st_mtime
+            with self._prompt_lock:
+                current_mtime = prompt_path.stat().st_mtime
 
-            # Check if cache is valid
-            if self._system_prompt_cache is not None and self._system_prompt_mtime == current_mtime:
+                # Check if cache is valid
+                if self._system_prompt_cache is not None and self._system_prompt_mtime == current_mtime:
+                    return self._system_prompt_cache
+
+                # Read and cache the prompt
+                content = prompt_path.read_text(encoding="utf-8")
+
+                # Verify mtime didn't change during read (file was modified)
+                if prompt_path.stat().st_mtime != current_mtime:
+                    # File changed during read, re-read to get consistent content
+                    content = prompt_path.read_text(encoding="utf-8")
+                    current_mtime = prompt_path.stat().st_mtime
+
+                self._system_prompt_cache = content
+                self._system_prompt_mtime = current_mtime
+
                 return self._system_prompt_cache
-
-            # Read and cache the prompt
-            self._system_prompt_cache = prompt_path.read_text(encoding="utf-8")
-            self._system_prompt_mtime = current_mtime
-
-            return self._system_prompt_cache
         except Exception as e:
             print(f"Error reading system prompt: {e}")
             return self.default_system_prompt
@@ -251,6 +266,11 @@ class LLMServer:
                 tool_args = function.get("arguments", {})
 
             tool_result = self.execute_tool(tool_name, tool_args)
+
+            # Truncate large results to prevent unbounded memory growth
+            max_chars = self.config.MAX_TOOL_RESULT_CHARS
+            if len(tool_result) > max_chars:
+                tool_result = tool_result[:max_chars] + f"\n\n[Truncated - {len(tool_result)} total chars]"
 
             # Format result message for backend
             if self.config.BACKEND_TYPE == "lmstudio":
@@ -591,7 +611,7 @@ class LLMServer:
         """Handle chat completion requests."""
         start_time = time.time()
         try:
-            data = request.get_json()
+            data = request.get_json(silent=True)
 
             # Validate JSON payload
             if data is None:

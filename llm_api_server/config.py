@@ -3,6 +3,21 @@
 from typing import Literal
 
 
+def _parse_bool_env(value: str, default: bool) -> bool:
+    """Parse boolean from environment variable string.
+
+    Args:
+        value: Environment variable string value
+        default: Default value if string is empty
+
+    Returns:
+        Parsed boolean value
+    """
+    if not value:
+        return default
+    return value.lower() in ("true", "1", "yes")
+
+
 class ServerConfig:
     """Base configuration class for LLM API Server.
 
@@ -27,6 +42,7 @@ class ServerConfig:
     SYSTEM_PROMPT_PATH: str = "system_prompt.md"
     THREADED: bool = True  # Enable threaded mode for concurrent requests
     MAX_TOOL_ITERATIONS: int = 5  # Maximum tool calling loop iterations per request
+    MAX_TOOL_RESULT_CHARS: int = 10000  # Maximum characters per tool result (prevents memory issues)
 
     # Model name advertised via API
     MODEL_NAME: str = "llm-server/default"
@@ -97,23 +113,26 @@ class ServerConfig:
         config.DEFAULT_PORT = int(get_env("PORT", str(cls.DEFAULT_PORT)))
         config.DEFAULT_TEMPERATURE = float(get_env("TEMPERATURE", str(cls.DEFAULT_TEMPERATURE)))
         config.SYSTEM_PROMPT_PATH = get_env("SYSTEM_PROMPT_PATH", cls.SYSTEM_PROMPT_PATH)
-        config.THREADED = get_env("THREADED", "").lower() not in ("false", "0", "no")
+        config.THREADED = _parse_bool_env(get_env("THREADED", ""), cls.THREADED)
         config.WEBUI_PORT = int(get_env("WEBUI_PORT", str(cls.WEBUI_PORT)))
-        config.DEBUG_TOOLS = get_env("DEBUG_TOOLS", "").lower() in ("true", "1", "yes")
+        config.DEBUG_TOOLS = _parse_bool_env(get_env("DEBUG_TOOLS", ""), cls.DEBUG_TOOLS)
         config.DEBUG_TOOLS_LOG_FILE = get_env("DEBUG_TOOLS_LOG_FILE", cls.DEBUG_TOOLS_LOG_FILE)
         config.DEBUG_LOG_MAX_BYTES = int(get_env("DEBUG_LOG_MAX_BYTES", str(cls.DEBUG_LOG_MAX_BYTES)))
         config.DEBUG_LOG_BACKUP_COUNT = int(get_env("DEBUG_LOG_BACKUP_COUNT", str(cls.DEBUG_LOG_BACKUP_COUNT)))
         config.BACKEND_CONNECT_TIMEOUT = int(get_env("BACKEND_CONNECT_TIMEOUT", str(cls.BACKEND_CONNECT_TIMEOUT)))
         config.BACKEND_READ_TIMEOUT = int(get_env("BACKEND_READ_TIMEOUT", str(cls.BACKEND_READ_TIMEOUT)))
-        config.HEALTH_CHECK_ON_STARTUP = get_env("HEALTH_CHECK_ON_STARTUP", "").lower() not in ("false", "0", "no")
+        config.HEALTH_CHECK_ON_STARTUP = _parse_bool_env(
+            get_env("HEALTH_CHECK_ON_STARTUP", ""), cls.HEALTH_CHECK_ON_STARTUP
+        )
         config.HEALTH_CHECK_TIMEOUT = int(get_env("HEALTH_CHECK_TIMEOUT", str(cls.HEALTH_CHECK_TIMEOUT)))
         config.BACKEND_RETRY_ATTEMPTS = int(get_env("BACKEND_RETRY_ATTEMPTS", str(cls.BACKEND_RETRY_ATTEMPTS)))
         config.BACKEND_RETRY_INITIAL_DELAY = float(
             get_env("BACKEND_RETRY_INITIAL_DELAY", str(cls.BACKEND_RETRY_INITIAL_DELAY))
         )
-        config.RATE_LIMIT_ENABLED = get_env("RATE_LIMIT_ENABLED", "").lower() in ("true", "1", "yes")
+        config.RATE_LIMIT_ENABLED = _parse_bool_env(get_env("RATE_LIMIT_ENABLED", ""), cls.RATE_LIMIT_ENABLED)
         config.RATE_LIMIT_DEFAULT = get_env("RATE_LIMIT_DEFAULT", cls.RATE_LIMIT_DEFAULT)
         config.RATE_LIMIT_STORAGE_URI = get_env("RATE_LIMIT_STORAGE_URI", cls.RATE_LIMIT_STORAGE_URI)
         config.MAX_TOOL_ITERATIONS = int(get_env("MAX_TOOL_ITERATIONS", str(cls.MAX_TOOL_ITERATIONS)))
+        config.MAX_TOOL_RESULT_CHARS = int(get_env("MAX_TOOL_RESULT_CHARS", str(cls.MAX_TOOL_RESULT_CHARS)))
 
         return config

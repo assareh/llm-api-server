@@ -73,7 +73,8 @@ def calculate(expression: str) -> str:
     def eval_node(node):
         """Recursively evaluate AST nodes."""
         if isinstance(node, ast.Constant):  # Numbers
-            if not isinstance(node.value, (int, float, complex)):
+            # Only allow numeric constants; bool subclasses int so block explicitly
+            if not isinstance(node.value, (int, float, complex)) or isinstance(node.value, bool):
                 raise ValueError(f"Only numeric constants allowed, got {type(node.value).__name__}")
             return node.value
         elif isinstance(node, ast.BinOp):  # Binary operations
@@ -209,6 +210,9 @@ def create_doc_search_tool(
         "Returns relevant text excerpts with source URLs."
     )
 
+    # Get parent context max chars from config (default 500)
+    parent_max_chars = index.config.parent_context_max_chars
+
     def _doc_search_wrapper(query: str, top_k: int = 5) -> str:
         """Search the document index and format results."""
         results = index.search(query, top_k=top_k, return_parent=True)
@@ -227,7 +231,10 @@ def create_doc_search_tool(
 
             # Include parent context if available and different from child
             if result.get("parent_text") and result["parent_text"] != result["text"]:
-                entry += f"\n---\nBroader context:\n{result['parent_text'][:500]}...\n"
+                parent_text = result["parent_text"]
+                if parent_max_chars > 0 and len(parent_text) > parent_max_chars:
+                    parent_text = parent_text[:parent_max_chars] + "..."
+                entry += f"\n---\nBroader context:\n{parent_text}\n"
 
             formatted.append(entry)
 

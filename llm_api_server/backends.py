@@ -6,6 +6,17 @@ from typing import Any
 
 import requests
 
+# Module-level session for connection pooling
+_session: requests.Session | None = None
+
+
+def _get_session() -> requests.Session:
+    """Get or create a shared requests Session for connection pooling."""
+    global _session
+    if _session is None:
+        _session = requests.Session()
+    return _session
+
 
 def get_tool_schema(tool) -> dict[str, Any]:
     """Extract schema from LangChain tool (handles both pydantic v1 and v2)."""
@@ -81,9 +92,10 @@ def call_ollama(messages: list[dict], tools: list, config, temperature: float = 
     # Set timeout as tuple (connect_timeout, read_timeout)
     timeout = (config.BACKEND_CONNECT_TIMEOUT, config.BACKEND_READ_TIMEOUT)
 
-    # Wrap the request in retry logic
+    # Wrap the request in retry logic (uses session for connection pooling)
     def _make_request():
-        response = requests.post(endpoint, json=payload, stream=stream, timeout=timeout)
+        session = _get_session()
+        response = session.post(endpoint, json=payload, stream=stream, timeout=timeout)
         response.raise_for_status()
         return response
 
@@ -115,9 +127,10 @@ def call_lmstudio(messages: list[dict], tools: list, config, temperature: float 
     # Set timeout as tuple (connect_timeout, read_timeout)
     timeout = (config.BACKEND_CONNECT_TIMEOUT, config.BACKEND_READ_TIMEOUT)
 
-    # Wrap the request in retry logic
+    # Wrap the request in retry logic (uses session for connection pooling)
     def _make_request():
-        response = requests.post(endpoint, json=payload, stream=stream, timeout=timeout)
+        session = _get_session()
+        response = session.post(endpoint, json=payload, stream=stream, timeout=timeout)
         response.raise_for_status()
         return response
 
@@ -136,7 +149,8 @@ def check_ollama_health(config, timeout: int = 5) -> tuple[bool, str]:
     """
     try:
         endpoint = f"{config.OLLAMA_ENDPOINT}/api/tags"
-        response = requests.get(endpoint, timeout=timeout)
+        session = _get_session()
+        response = session.get(endpoint, timeout=timeout)
         response.raise_for_status()
 
         # Check if the configured model is available
@@ -173,7 +187,8 @@ def check_lmstudio_health(config, timeout: int = 5) -> tuple[bool, str]:
     """
     try:
         endpoint = f"{config.LMSTUDIO_ENDPOINT}/models"
-        response = requests.get(endpoint, timeout=timeout)
+        session = _get_session()
+        response = session.get(endpoint, timeout=timeout)
         response.raise_for_status()
 
         # LM Studio returns model list if healthy

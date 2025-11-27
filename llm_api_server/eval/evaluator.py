@@ -70,7 +70,8 @@ class Evaluator:
             elapsed = time.time() - start_time
 
             if response.status_code != 200:
-                return None, elapsed, f"HTTP {response.status_code}: {response.text}", []
+                error_text = response.text[:500] if len(response.text) > 500 else response.text
+                return None, elapsed, f"HTTP {response.status_code}: {error_text}", []
 
             data = response.json()
             content = data.get("choices", [{}])[0].get("message", {}).get("content", "")

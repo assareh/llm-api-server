@@ -48,6 +48,12 @@ uv run pytest tests/test_config.py::TestServerConfig::test_default_config
 - `test_config.py` - Configuration loading and environment variable tests
 - `test_backends.py` - Backend health checks and retry logic tests
 - `test_server.py` - Server initialization, tool execution, and route tests
+- `test_web_search.py` - Web search tool (mocked Ollama, no network)
+- `test_html_report.py` - HTML reporter generation (asserts collapsible sections/markdown)
+- `test_builtin_tools.py` - Calculator safety regressions
+- `test_rag_indexer.py` - Cache load/child-parent mapping regression
+- `test_rag_chunker.py` - Chunker parent/child linking (skips if optional deps missing)
+- `test_rag_crawler.py` - Redirect/content-type filtering (mocked requests)
 
 ## Test Markers
 

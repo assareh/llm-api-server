@@ -1,5 +1,7 @@
 """Tests for LLMServer class."""
 
+import json
+
 import pytest
 
 from llm_api_server.server import LLMServer
@@ -139,6 +141,93 @@ class TestLLMServer:
         # Third load (should reload from file)
         prompt3 = server.get_system_prompt()
         assert prompt3 == "Updated prompt"
+
+    def test_chat_completion_tool_call_flow(self, default_config, sample_tools, monkeypatch):
+        """Process tool calls then return final assistant message."""
+        server = LLMServer(
+            name="TestServer",
+            model_name="test/model",
+            tools=sample_tools,
+            config=default_config,
+        )
+
+        user_messages = [{"role": "user", "content": "hello"}]
+
+        first_response = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "function": {
+                                    "name": "test_tool",
+                                    "arguments": json.dumps({"query": "hello"}),
+                                },
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+        final_response = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Done with tool output",
+                    }
+                }
+            ]
+        }
+
+        class DummyResponse:
+            def __init__(self, payload):
+                self._payload = payload
+
+            def json(self):
+                return self._payload
+
+        responses = iter([DummyResponse(first_response), DummyResponse(final_response)])
+
+        def call_backend_side_effect(messages, temperature, stream=False):
+            return next(responses)
+
+        monkeypatch.setattr(server, "call_backend", call_backend_side_effect)
+
+        result = server.process_chat_completion(user_messages, temperature=0.5, max_iterations=3)
+
+        assert result["choices"][0]["message"]["content"] == "Done with tool output"
+        assert "test_tool" in result["tools_used"]
+
+
+def test_streaming_response_shapes_sse_chunks(default_config, sample_tools, monkeypatch):
+    """Streamed responses should yield OpenAI-formatted SSE chunks."""
+    server = LLMServer(
+        name="TestServer",
+        model_name="test/model",
+        tools=sample_tools,
+        config=default_config,
+    )
+
+    class DummyStreamResponse:
+        def iter_lines(self):
+            return iter(
+                [
+                    b'data: {"choices":[{"delta":{"content":"Hi there"}}]}',
+                    b"data: [DONE]",
+                ]
+            )
+
+    monkeypatch.setattr(server, "call_backend", lambda messages, temperature, stream=True: DummyStreamResponse())
+
+    chunks = list(server._stream_from_backend([{"role": "user", "content": "hello"}], temperature=0.2))
+
+    assert any("Hi there" in chunk for chunk in chunks)
+    assert any('"finish_reason": "stop"' in chunk for chunk in chunks)
+    assert chunks[-1].strip() == "data: [DONE]"
 
 
 @pytest.mark.unit
