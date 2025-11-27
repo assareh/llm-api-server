@@ -29,16 +29,17 @@ class RAGConfig:
         parent_chunk_overlap: Overlap tokens between parent chunks (default: 100)
 
         # Search settings
-        hybrid_bm25_weight: Weight for BM25 keyword search (default: 0.3)
-        hybrid_semantic_weight: Weight for semantic vector search (default: 0.7)
+        hybrid_bm25_weight: Weight for BM25 in Reciprocal Rank Fusion (default: 0.3).
+            NOTE: Uses RRF, not weighted average. Higher weight = ranks from that
+            retriever contribute more to final ordering. Formula: score = Σ(weight/(rank+60))
+        hybrid_semantic_weight: Weight for semantic search in RRF (default: 0.7).
+            With defaults (0.3/0.7), semantic ranks are weighted ~2.3x more than BM25.
         search_top_k: Default number of results to return (default: 5)
         rerank_enabled: Enable cross-encoder re-ranking (default: True)
-        rerank_top_k: Number of candidates for final re-ranking (default: 80)
 
         # Model settings
         embedding_model: HuggingFace embedding model name
-        rerank_model: Cross-encoder model for final re-ranking
-        light_rerank_model: Lightweight cross-encoder for first-pass re-ranking
+        rerank_model: Cross-encoder model for re-ranking
 
         # Index settings
         update_check_interval_hours: Hours between index update checks (default: 168 = 7 days)
@@ -66,18 +67,16 @@ class RAGConfig:
     parent_chunk_size: int = 900
     parent_chunk_overlap: int = 100
 
-    # Search settings
-    hybrid_bm25_weight: float = 0.3
-    hybrid_semantic_weight: float = 0.7
+    # Search settings (uses Reciprocal Rank Fusion, not weighted average)
+    hybrid_bm25_weight: float = 0.3  # RRF weight for BM25 keyword search
+    hybrid_semantic_weight: float = 0.7  # RRF weight for semantic vector search
     search_top_k: int = 5
     retriever_candidate_multiplier: int = 3  # Multiplier for initial retrieval candidates (search_top_k * this)
     rerank_enabled: bool = True
-    rerank_top_k: int = 80
 
     # Model settings
     embedding_model: str = "all-MiniLM-L6-v2"
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-12-v2"
-    light_rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     # Index settings
     update_check_interval_hours: int = 168  # 7 days

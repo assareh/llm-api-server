@@ -408,7 +408,10 @@ def _flush_parent_chunk(
     child_min_tokens: int,
     child_max_tokens: int,
 ):
-    """Create a parent chunk and its children from text parts."""
+    """Create a parent chunk and its children from text parts.
+
+    Handles content of any size - small parts are merged, large parts are split.
+    """
     content = "\n\n".join(text_parts)
     tokens = count_tokens(content)
     parent_id = _generate_chunk_id(canonical_url, heading_path, sub_idx)
@@ -422,18 +425,66 @@ def _flush_parent_chunk(
     }
     parents.append(parent_chunk)
 
-    # Create children from text parts
+    # Create children from text parts with proper handling of all sizes
+    child_idx = 0
+    pending_content = []
+    pending_tokens = 0
+
+    def add_child(text: str, tok: int):
+        nonlocal child_idx
+        child_chunk = {
+            "chunk_id": _generate_chunk_id(canonical_url, heading_path, f"{sub_idx}_child_{child_idx}"),
+            "parent_id": parent_id,
+            "content": text,
+            "tokens": tok,
+            "metadata": replace(metadata, is_parent=False, parent_id=parent_id),
+        }
+        children.append(child_chunk)
+        child_idx += 1
+
+    def flush_pending():
+        nonlocal pending_content, pending_tokens
+        if pending_content and pending_tokens >= child_min_tokens // 2:
+            merged = "\n\n".join(pending_content)
+            add_child(merged, pending_tokens)
+        pending_content = []
+        pending_tokens = 0
+
     for part in text_parts:
         part_tokens = count_tokens(part)
-        if child_min_tokens <= part_tokens <= child_max_tokens:
-            child_chunk = {
-                "chunk_id": _generate_chunk_id(canonical_url, heading_path, f"{sub_idx}_child_{len(children)}"),
-                "parent_id": parent_id,
-                "content": part,
-                "tokens": part_tokens,
-                "metadata": replace(metadata, is_parent=False, parent_id=parent_id),
-            }
-            children.append(child_chunk)
+
+        if part_tokens > child_max_tokens:
+            # Split large parts at sentence boundaries
+            flush_pending()
+            sentences = re.split(r"(?<=[.!?])\s+", part)
+            current_text = ""
+            current_tokens = 0
+            for sentence in sentences:
+                sent_tokens = count_tokens(sentence)
+                if current_tokens + sent_tokens > child_max_tokens and current_text:
+                    add_child(current_text.strip(), current_tokens)
+                    current_text = sentence
+                    current_tokens = sent_tokens
+                else:
+                    current_text += " " + sentence if current_text else sentence
+                    current_tokens += sent_tokens
+            if current_text.strip():
+                if current_tokens >= child_min_tokens:
+                    add_child(current_text.strip(), current_tokens)
+                else:
+                    pending_content.append(current_text.strip())
+                    pending_tokens += current_tokens
+        elif part_tokens >= child_min_tokens:
+            flush_pending()
+            add_child(part, part_tokens)
+        else:
+            # Accumulate small parts
+            pending_content.append(part)
+            pending_tokens += part_tokens
+            if pending_tokens >= child_min_tokens:
+                flush_pending()
+
+    flush_pending()
 
 
 def _split_oversized_part(
@@ -448,7 +499,11 @@ def _split_oversized_part(
     child_max_tokens: int,
     parent_max_tokens: int,
 ):
-    """Split an oversized text part on sentence boundaries."""
+    """Split an oversized text part on sentence boundaries.
+
+    Creates parent chunks that fit within parent_max_tokens, and child chunks
+    for all content (splitting large chunks, merging small ones).
+    """
     # Split on sentence boundaries
     sentences = re.split(r"(?<=[.!?])\s+", text)
 
@@ -456,32 +511,71 @@ def _split_oversized_part(
     current_tokens = 0
     chunk_idx = 0
 
+    def create_parent_and_children(content: str, tokens: int, idx: int):
+        """Create a parent chunk and appropriate child chunks."""
+        parent_id = _generate_chunk_id(canonical_url, heading_path, f"{sub_idx}_{idx}")
+        parent_chunk = {
+            "chunk_id": parent_id,
+            "content": content,
+            "tokens": tokens,
+            "metadata": replace(metadata, is_parent=True),
+            "sub_chunk": f"{sub_idx}_{idx}",
+        }
+        parents.append(parent_chunk)
+
+        # Create child chunk(s) - split if too large, always create if meaningful
+        if tokens > child_max_tokens:
+            # Split into multiple children at sentence boundaries
+            child_sentences = re.split(r"(?<=[.!?])\s+", content)
+            child_text = ""
+            child_tokens = 0
+            child_idx = 0
+            for sent in child_sentences:
+                sent_tok = count_tokens(sent)
+                if child_tokens + sent_tok > child_max_tokens and child_text:
+                    child_chunk = {
+                        "chunk_id": _generate_chunk_id(
+                            canonical_url, heading_path, f"{sub_idx}_{idx}_child_{child_idx}"
+                        ),
+                        "parent_id": parent_id,
+                        "content": child_text.strip(),
+                        "tokens": child_tokens,
+                        "metadata": replace(metadata, is_parent=False, parent_id=parent_id),
+                    }
+                    children.append(child_chunk)
+                    child_idx += 1
+                    child_text = sent
+                    child_tokens = sent_tok
+                else:
+                    child_text += " " + sent if child_text else sent
+                    child_tokens += sent_tok
+            if child_text.strip():
+                child_chunk = {
+                    "chunk_id": _generate_chunk_id(canonical_url, heading_path, f"{sub_idx}_{idx}_child_{child_idx}"),
+                    "parent_id": parent_id,
+                    "content": child_text.strip(),
+                    "tokens": child_tokens,
+                    "metadata": replace(metadata, is_parent=False, parent_id=parent_id),
+                }
+                children.append(child_chunk)
+        else:
+            # Content fits in one child - create it regardless of min threshold
+            # (parent already exists, child provides focused search target)
+            child_chunk = {
+                "chunk_id": _generate_chunk_id(canonical_url, heading_path, f"{sub_idx}_{idx}_child"),
+                "parent_id": parent_id,
+                "content": content,
+                "tokens": tokens,
+                "metadata": replace(metadata, is_parent=False, parent_id=parent_id),
+            }
+            children.append(child_chunk)
+
     for sentence in sentences:
         sent_tokens = count_tokens(sentence)
 
         if current_tokens + sent_tokens > parent_max_tokens and current_text:
             # Flush current chunk
-            parent_id = _generate_chunk_id(canonical_url, heading_path, f"{sub_idx}_{chunk_idx}")
-            parent_chunk = {
-                "chunk_id": parent_id,
-                "content": current_text,
-                "tokens": current_tokens,
-                "metadata": replace(metadata, is_parent=True),
-                "sub_chunk": f"{sub_idx}_{chunk_idx}",
-            }
-            parents.append(parent_chunk)
-
-            # Create child if size is right
-            if child_min_tokens <= current_tokens <= child_max_tokens:
-                child_chunk = {
-                    "chunk_id": _generate_chunk_id(canonical_url, heading_path, f"{sub_idx}_{chunk_idx}_child"),
-                    "parent_id": parent_id,
-                    "content": current_text,
-                    "tokens": current_tokens,
-                    "metadata": replace(metadata, is_parent=False, parent_id=parent_id),
-                }
-                children.append(child_chunk)
-
+            create_parent_and_children(current_text, current_tokens, chunk_idx)
             current_text = sentence
             current_tokens = sent_tokens
             chunk_idx += 1
@@ -491,15 +585,7 @@ def _split_oversized_part(
 
     # Flush final chunk
     if current_text:
-        parent_id = _generate_chunk_id(canonical_url, heading_path, f"{sub_idx}_{chunk_idx}")
-        parent_chunk = {
-            "chunk_id": parent_id,
-            "content": current_text,
-            "tokens": current_tokens,
-            "metadata": replace(metadata, is_parent=True),
-            "sub_chunk": f"{sub_idx}_{chunk_idx}",
-        }
-        parents.append(parent_chunk)
+        create_parent_and_children(current_text, current_tokens, chunk_idx)
 
 
 def _create_children_from_section(
@@ -510,27 +596,105 @@ def _create_children_from_section(
     child_min_tokens: int,
     child_max_tokens: int,
 ):
-    """Create child chunks from section content blocks."""
+    """Create child chunks from section content blocks.
+
+    Handles content of any size:
+    - Small content (<min_tokens): Accumulate and merge with adjacent content
+    - Medium content (min-max tokens): Create child chunk directly
+    - Large content (>max_tokens): Split at sentence boundaries
+    """
     child_idx = 0
 
-    # Create children from content blocks (paragraphs, lists)
+    # Accumulator for small content blocks that need merging
+    pending_content = []
+    pending_tokens = 0
+
+    def flush_pending():
+        """Flush accumulated small content as a child chunk."""
+        nonlocal child_idx, pending_content, pending_tokens
+        if not pending_content:
+            return
+        merged = "\n\n".join(pending_content)
+        # Only create child if we have meaningful content
+        if pending_tokens >= child_min_tokens // 2:  # Lower threshold for merged content
+            child_chunk = {
+                "chunk_id": f"{parent_id}_child_{child_idx}",
+                "parent_id": parent_id,
+                "content": merged,
+                "tokens": pending_tokens,
+                "metadata": replace(metadata, is_parent=False, parent_id=parent_id),
+            }
+            children.append(child_chunk)
+            child_idx += 1
+        pending_content = []
+        pending_tokens = 0
+
+    def add_child(content: str, tokens: int):
+        """Add a single child chunk."""
+        nonlocal child_idx
+        child_chunk = {
+            "chunk_id": f"{parent_id}_child_{child_idx}",
+            "parent_id": parent_id,
+            "content": content,
+            "tokens": tokens,
+            "metadata": replace(metadata, is_parent=False, parent_id=parent_id),
+        }
+        children.append(child_chunk)
+        child_idx += 1
+
+    def split_large_content(content: str, tokens: int):
+        """Split oversized content at sentence boundaries."""
+        nonlocal child_idx
+        sentences = re.split(r"(?<=[.!?])\s+", content)
+        current_text = ""
+        current_tokens = 0
+
+        for sentence in sentences:
+            sent_tokens = count_tokens(sentence)
+
+            if current_tokens + sent_tokens > child_max_tokens and current_text:
+                # Flush current chunk
+                add_child(current_text.strip(), current_tokens)
+                current_text = sentence
+                current_tokens = sent_tokens
+            else:
+                current_text += " " + sentence if current_text else sentence
+                current_tokens += sent_tokens
+
+        # Flush remaining
+        if current_text.strip():
+            if current_tokens >= child_min_tokens:
+                add_child(current_text.strip(), current_tokens)
+            else:
+                # Add to pending for merging
+                pending_content.append(current_text.strip())
+                nonlocal pending_tokens
+                pending_tokens += current_tokens
+
+    # Process content blocks (paragraphs, lists)
     for content in section.get("content_blocks", []):
         if not content or len(content.strip()) < 20:
             continue
 
         tokens = count_tokens(content)
-        if child_min_tokens <= tokens <= child_max_tokens:
-            child_chunk = {
-                "chunk_id": f"{parent_id}_child_{child_idx}",
-                "parent_id": parent_id,
-                "content": content,
-                "tokens": tokens,
-                "metadata": replace(metadata, is_parent=False, parent_id=parent_id),
-            }
-            children.append(child_chunk)
-            child_idx += 1
 
-    # Create children from code blocks
+        if tokens > child_max_tokens:
+            # Large content: flush pending first, then split
+            flush_pending()
+            split_large_content(content, tokens)
+        elif tokens >= child_min_tokens:
+            # Medium content: flush pending, then add directly
+            flush_pending()
+            add_child(content, tokens)
+        else:
+            # Small content: accumulate for merging
+            pending_content.append(content)
+            pending_tokens += tokens
+            # If accumulated enough, flush
+            if pending_tokens >= child_min_tokens:
+                flush_pending()
+
+    # Process code blocks (keep atomic, don't split)
     for code_data in section.get("code_blocks", []):
         lang = code_data.get("lang", "text")
         code = code_data.get("code", "").strip()
@@ -540,33 +704,28 @@ def _create_children_from_section(
         code_text = f"```{lang}\n{code}\n```"
         tokens = count_tokens(code_text)
 
-        if tokens <= child_max_tokens:
-            child_chunk = {
-                "chunk_id": f"{parent_id}_child_{child_idx}",
-                "parent_id": parent_id,
-                "content": code_text,
-                "tokens": tokens,
-                "metadata": replace(metadata, is_parent=False, parent_id=parent_id),
-            }
-            children.append(child_chunk)
-            child_idx += 1
+        # Flush any pending content before code
+        flush_pending()
 
-    # Create children from tables (if not too large)
+        # Code blocks are kept atomic - add regardless of size
+        # (splitting code would break it)
+        add_child(code_text, tokens)
+
+    # Process tables (keep atomic, don't split)
     for table_text in section.get("tables", []):
         if not table_text or len(table_text.strip()) < 20:
             continue
 
         tokens = count_tokens(table_text)
-        if child_min_tokens <= tokens <= child_max_tokens:
-            child_chunk = {
-                "chunk_id": f"{parent_id}_child_{child_idx}",
-                "parent_id": parent_id,
-                "content": table_text,
-                "tokens": tokens,
-                "metadata": replace(metadata, is_parent=False, parent_id=parent_id),
-            }
-            children.append(child_chunk)
-            child_idx += 1
+
+        # Flush any pending content before table
+        flush_pending()
+
+        # Tables are kept atomic - add regardless of size
+        add_child(table_text, tokens)
+
+    # Flush any remaining pending content
+    flush_pending()
 
 
 def _generate_chunk_id(canonical_url: str, heading_path: list[str], sub_idx: Any) -> str:
