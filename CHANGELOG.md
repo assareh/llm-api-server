@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2025-11-27
+
+### Fixed
+- **RAG Readability Extraction** - Removed overly aggressive byte-size fallback threshold
+  - Previous 30% retention threshold caused fallback to original HTML on nearly all pages
+  - Modern JS-heavy sites (Next.js, React) have 80-95% boilerplate, so low retention is expected
+  - Now only falls back when code blocks are stripped (>50% loss)
+  - Results in much smaller, cleaner indexed content without navigation/script noise
+
 ## [0.6.0] - 2025-11-27
 
 ### Added

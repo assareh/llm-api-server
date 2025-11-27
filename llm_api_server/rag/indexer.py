@@ -534,8 +534,12 @@ class DocSearchIndex:
         """Extract main content from HTML using readability.
 
         Uses readability to extract the main content, but falls back to the original
-        HTML if readability strips too much content (>30% loss) or removes code blocks.
-        This protects technical documentation from being over-simplified.
+        HTML if readability removes too many code blocks (>50% loss). This protects
+        technical documentation from losing code examples.
+
+        Note: We intentionally do NOT check byte-size retention. Modern JS-heavy sites
+        (Next.js, React) often have 80-95% boilerplate (scripts, navigation, hydration
+        JSON), so low byte retention is expected and correct behavior.
 
         Args:
             html: Raw HTML content
@@ -551,15 +555,7 @@ class DocSearchIndex:
             doc = ReadabilityDocument(html, url=url)
             clean_html = doc.summary()
 
-            # Check for excessive content loss (>30%)
-            if len(clean_html) < len(html) * 0.3:
-                logger.warning(
-                    f"[RAG] Readability removed >70% of content from {url}, using original HTML "
-                    f"(original: {len(html)}, clean: {len(clean_html)})"
-                )
-                return html
-
-            # Check if code blocks were stripped
+            # Check if code blocks were stripped (>50% loss)
             clean_code_blocks = clean_html.lower().count("<pre") + clean_html.lower().count("<code")
             if original_code_blocks > 0 and clean_code_blocks < original_code_blocks * 0.5:
                 logger.warning(
