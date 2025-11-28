@@ -117,6 +117,7 @@ class LLMServer:
 
             max_mb = config.DEBUG_LOG_MAX_BYTES / (1024 * 1024)
             print(f"Tool debug logging enabled: {log_file.absolute()}")
+            print(f"  Format: {config.DEBUG_LOG_FORMAT}")
             print(f"  Logging: {', '.join(logger_names)}")
             print(f"  Rotation: {max_mb:.1f}MB max, {config.DEBUG_LOG_BACKUP_COUNT} backups")
         else:
