@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2025-11-28
+
+### Added
+- **Tool Loop Timeout** - New `TOOL_LOOP_TIMEOUT` config option
+  - Maximum seconds for the entire tool loop (default: 120, 0 = no timeout)
+  - Prevents runaway tool loops from blocking requests indefinitely
+  - Environment variable: `<PREFIX>_TOOL_LOOP_TIMEOUT`
+
+### Changed
+- **Graceful Tool Loop Completion** - Improved behavior when hitting limits
+  - When max iterations or timeout is reached, now makes one final backend call WITHOUT tools
+  - Forces LLM to synthesize a proper response from all gathered tool results
+  - Replaces the previous canned "I apologize" error message with actual content
+  - New `_generate_final_response()` method handles the final synthesis call
+  - Proper error handling if the final response call fails
+
+## [0.7.0] - 2025-11-28
+
+### Added
+- **RAG Evaluation Module** - Comprehensive retrieval quality metrics
+  - Precision, recall, and F1 score at configurable k values
+  - Mean Reciprocal Rank (MRR) for ranking quality
+  - Normalized Discounted Cumulative Gain (NDCG) for graded relevance
+  - Context relevance scoring for RAG pipelines
+  - Answer faithfulness and groundedness metrics
+  - Implementation: `llm_api_server/eval/rag_evaluator.py`
+
+## [0.6.4] - 2025-11-27
+
+### Added
+- **Structured Debug Logging** - JSON and YAML log formats for tool debugging
+  - New `DEBUG_LOG_FORMAT` option: "text" (default), "json", or "yaml"
+  - JSON format: Machine-parseable, one JSON object per log entry (use with `jq`)
+  - YAML format: Human-readable structured format with literal blocks for multiline
+  - New `DEBUG_LOG_MAX_RESPONSE_LENGTH` option: Max chars in logs, 0 = no truncation (default: 1000)
+  - All log events include: timestamp, event type, tool name, duration, inputs/outputs
+  - Event types: request, backend_call, tool_loop_iteration, tool_call, tool_error, etc.
+
 ## [0.6.3] - 2025-11-27
 
 ### Fixed
