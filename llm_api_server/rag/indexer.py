@@ -169,7 +169,7 @@ class DocSearchIndex:
             force_rebuild: Force full rebuild of index and crawl state (clears all state)
             force_refresh: Force refetch of all cached pages (bypasses page cache, but keeps crawl state)
         """
-        if not force_rebuild and not self.needs_update():
+        if not force_rebuild and not force_refresh and not self.needs_update():
             logger.info("[RAG] Index is up-to-date, loading from cache")
             self.load_index()
             return
@@ -303,6 +303,15 @@ class DocSearchIndex:
         # Identify refreshed pages (pages that were refetched, not from cache)
         refreshed_urls = {page["url"] for page in new_pages if not page.get("from_cache")}
 
+        # Filter pages to chunk: only chunk pages with fresh content, not cached pages
+        # Cached pages already have their chunks in the index, re-chunking would create duplicates
+        pages_to_chunk = [page for page in new_pages if not page.get("from_cache")]
+        cached_page_count = len(new_pages) - len(pages_to_chunk)
+        if cached_page_count > 0:
+            logger.info(
+                f"[RAG] Skipping {cached_page_count} cached pages (already have chunks), chunking {len(pages_to_chunk)} fresh pages"
+            )
+
         # If resuming/expanding/refreshing, load existing chunks first
         if is_resuming or is_expanding or is_refreshing:
             logger.info("[RAG] Loading existing chunks for incremental update...")
@@ -343,13 +352,13 @@ class DocSearchIndex:
             self.parent_chunks = {}
             self.child_to_parent = {}
 
-        # Create chunks from new pages
+        # Create chunks from pages with fresh content only (not cached pages)
         new_chunk_count_before = len(self.chunks)
-        self._create_chunks(new_pages)
+        self._create_chunks(pages_to_chunk)
         new_chunk_count = len(self.chunks) - new_chunk_count_before
 
         logger.info(
-            f"[RAG] Created {new_chunk_count} new child chunks from {len(new_pages)} pages in {time.time() - start_time:.1f}s"
+            f"[RAG] Created {new_chunk_count} new child chunks from {len(pages_to_chunk)} pages in {time.time() - start_time:.1f}s"
         )
         logger.info(f"[RAG] Total chunks: {len(self.chunks)} child chunks, {len(self.parent_chunks)} parent chunks")
 
