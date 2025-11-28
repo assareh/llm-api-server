@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2025-11-28
+
+### Added
+- **RAG Staleness Refresh** - Three mechanisms to refresh existing cached content (GitHub issue #1)
+  - **`force_refresh=True` option** - Bypasses page cache to refetch all pages while keeping crawl state
+  - **TTL-based cache invalidation** - Pages without `lastmod` expire after `page_cache_ttl_hours` (default: 7 days)
+  - **Periodic recrawl of existing URLs** - When `update_check_interval_hours` triggers, existing URLs are now checked for staleness
+
+### Changed
+- When pages are refreshed, old chunks are removed before new ones are added
+- If any content was replaced during refresh, a full index rebuild is triggered (FAISS doesn't support incremental removal)
+- Page cache now stores `cached_at` timestamp for TTL-based expiration
+
+### Configuration
+- New `page_cache_ttl_hours` option in `RAGConfig` (default: 168 = 7 days, 0 = never expire)
+
 ## [0.7.2] - 2025-11-28
 
 ### Fixed

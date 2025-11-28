@@ -320,6 +320,7 @@ config = RAGConfig(
 
     # Index settings
     update_check_interval_hours=168,       # Check for updates (7 days)
+    page_cache_ttl_hours=168,              # TTL for cached pages without lastmod (7 days, 0 = never)
 )
 ```
 
@@ -342,9 +343,20 @@ else:
     print("Index is up-to-date")
     index.load_index()
 
-# Force rebuild
+# Force rebuild (clears all state, re-crawls everything)
 index.crawl_and_index(force_rebuild=True)
+
+# Force refresh (refetches all cached pages, bypasses TTL)
+index.crawl_and_index(force_refresh=True)
 ```
+
+### Cache Invalidation
+
+Pages are automatically refreshed based on:
+
+1. **Sitemap `lastmod`** - Pages with `lastmod` in sitemap are refetched when the date changes
+2. **TTL expiration** - Pages without `lastmod` expire after `page_cache_ttl_hours` (default: 7 days)
+3. **Manual refresh** - Use `force_refresh=True` to bypass all caching
 
 ### Advanced: Hybrid Search Weights
 

@@ -337,9 +337,15 @@ config = RAGConfig(
 )
 
 index = DocSearchIndex(config)
-index.crawl_and_index()
+index.crawl_and_index()  # Normal update
+index.crawl_and_index(force_refresh=True)  # Refetch all cached pages
 results = index.search("query", top_k=5)
 ```
+
+**Cache Invalidation:**
+- Pages with sitemap `lastmod`: invalidated when date changes
+- Pages without `lastmod`: invalidated after `page_cache_ttl_hours` (default: 7 days)
+- `force_refresh=True`: bypasses all caching, refetches everything
 
 **Ported from Ivan:**
 This module was generalized from Ivan's HashiCorp doc search implementation:
@@ -375,4 +381,4 @@ When making changes, test in both projects.
 ---
 
 *Last updated: 2025-11-28*
-*Version: 0.7.2*
+*Version: 0.7.3*
