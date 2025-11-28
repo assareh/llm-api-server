@@ -681,7 +681,16 @@ class LLMServer:
                 }
 
             # Execute tool calls and append results
-            full_messages.append(message)
+            # Only include standard message fields to avoid confusing the model
+            # (some models add non-standard fields like 'reasoning' that shouldn't be sent back)
+            clean_message = {
+                "role": message.get("role", "assistant"),
+                "content": message.get("content", ""),
+            }
+            # Include tool_calls if present (required for proper conversation flow)
+            if "tool_calls" in message:
+                clean_message["tool_calls"] = message["tool_calls"]
+            full_messages.append(clean_message)
             tool_results = self._execute_tool_calls(tool_calls, tools_used)
             full_messages.extend(tool_results)
 
