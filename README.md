@@ -194,7 +194,7 @@ server = LLMServer(
 
 ## RAG Module (Document Search)
 
-LLM API Server includes a powerful RAG (Retrieval-Augmented Generation) module for building local documentation search systems.
+LLM API Server includes a RAG (Retrieval-Augmented Generation) module for building local documentation search systems with hybrid retrieval and cross-encoder re-ranking.
 
 ### Installation
 
@@ -203,18 +203,53 @@ LLM API Server includes a powerful RAG (Retrieval-Augmented Generation) module f
 uv sync --extra rag
 ```
 
-### Features
+### Architecture Overview
 
-- **Three crawling modes:**
-  - Sitemap-based (discovers sitemap.xml automatically)
-  - Recursive web crawling (follows links)
-  - Manual URL list (explicit control)
-- **Semantic HTML chunking** - Respects document structure (headings, code blocks, tables)
-- **Parent-child chunks** - Hierarchical context for better retrieval
-- **Hybrid search** - Combines BM25 keyword search + semantic vector search
-- **Cross-encoder re-ranking** - Two-stage re-ranking for improved relevance
-- **Incremental updates** - Only re-indexes changed content
-- **Local-first** - Everything runs locally (FAISS, HuggingFace embeddings)
+The RAG module uses a four-component architecture:
+
+1. **DocumentCrawler** (`crawler.py`) - URL discovery with sitemap/recursive/manual modes
+2. **Chunker** (`chunker.py`) - Semantic HTML parsing with parent-child relationships
+3. **DocSearchIndex** (`indexer.py`) - Main orchestrator for indexing and search
+4. **RAGConfig** (`config.py`) - Comprehensive configuration with sensible defaults
+
+### Key Features
+
+**Intelligent Crawling:**
+- **Three modes with smart fallback:** Sitemap → Recursive → Manual
+- **Robots.txt compliance** with intelligent parsing
+- **URL normalization** (removes query params, anchors, trailing slashes)
+- **Include/exclude patterns** with regex support
+- **Parallel fetching** with configurable rate limiting
+
+**Semantic HTML Chunking:**
+- **Token-aware processing** using tiktoken (matches GPT tokenization)
+- **Preserves atomic content** - code blocks and tables kept intact
+- **Parent-child hierarchy** - focused retrieval with full context recovery
+- **Heading-based sectioning** - respects document structure (h1-h6)
+- **Boilerplate removal** - CSS selector-based filtering of nav, footer, etc.
+
+**Hybrid Search:**
+- **BM25 keyword search** - captures exact term matches
+- **Semantic vector search** - captures conceptual similarity
+- **Reciprocal Rank Fusion (RRF)** - combines rankings from both retrievers
+- **Configurable weights** - tune keyword vs semantic emphasis in RRF formula
+
+**Two-Stage Re-ranking:**
+- **Cross-encoder re-ranking** using MS MARCO model
+- **Min-max score normalization** for consistent ranking
+- **Configurable candidate pool** (rerank_top_k)
+
+**Production-Ready Features:**
+- **Incremental indexing** - resume interrupted crawls, add new docs efficiently
+- **SHA256 checksums** - index integrity verification
+- **Content deduplication** - by hash before indexing
+- **GPU auto-detection** - MPS (Apple Silicon), CUDA, or CPU fallback
+- **Rich metadata** - heading path, section ID, document type, code identifiers
+
+**Local-First Design:**
+- **FAISS** for vector storage (no cloud dependencies)
+- **HuggingFace embeddings** (all-MiniLM-L6-v2, ~80MB)
+- **Everything runs locally** - no API keys required for core functionality
 
 ### Quick Start
 
@@ -314,21 +349,22 @@ index.crawl_and_index(force_rebuild=True)
 
 ### Advanced: Hybrid Search Weights
 
-Adjust the balance between keyword and semantic search:
+Adjust the balance between keyword and semantic search using Reciprocal Rank Fusion (RRF).
+The weights scale each retriever's contribution to the RRF score: `score += weight / (rank + 60)`.
 
 ```python
 # More keyword-focused (good for technical docs with specific terms)
 config = RAGConfig(
     base_url="https://docs.example.com",
-    hybrid_bm25_weight=0.5,      # 50% keyword
-    hybrid_semantic_weight=0.5,  # 50% semantic
+    hybrid_bm25_weight=0.5,      # Equal weight to BM25 ranks
+    hybrid_semantic_weight=0.5,  # Equal weight to semantic ranks
 )
 
 # More semantic-focused (good for concept-based queries)
 config = RAGConfig(
     base_url="https://docs.example.com",
-    hybrid_bm25_weight=0.2,      # 20% keyword
-    hybrid_semantic_weight=0.8,  # 80% semantic
+    hybrid_bm25_weight=0.2,      # Lower influence from BM25 ranks
+    hybrid_semantic_weight=0.8,  # Higher influence from semantic ranks
 )
 ```
 

@@ -695,7 +695,9 @@ class LLMServer:
 
         # Buffer for thinker model detection and filtering
         content_buffer = ""
+        full_content = ""  # Keep all content in case model doesn't use markers
         in_final_response = False
+        found_markers = False  # Track if we ever found thinker markers
         begin_marker = "[BEGIN FINAL RESPONSE]"
         end_marker = "[END FINAL RESPONSE]"
 
@@ -712,7 +714,7 @@ class LLMServer:
 
         def process_buffered_content() -> Generator[str, None, None]:
             """Process buffered content for thinker model markers."""
-            nonlocal content_buffer, in_final_response
+            nonlocal content_buffer, in_final_response, found_markers
 
             while True:
                 if not in_final_response:
@@ -720,16 +722,14 @@ class LLMServer:
                     begin_idx = content_buffer.find(begin_marker)
                     if begin_idx != -1:
                         # Found begin marker - discard everything before it (reasoning)
+                        found_markers = True
                         content_buffer = content_buffer[begin_idx + len(begin_marker) :]
                         in_final_response = True
                         # Strip leading whitespace after marker
                         content_buffer = content_buffer.lstrip()
                     else:
-                        # No begin marker yet - check if we might be mid-marker
-                        # Keep last len(begin_marker)-1 chars in case marker spans chunks
-                        if len(content_buffer) > len(begin_marker):
-                            # Discard content that can't be start of marker (it's reasoning)
-                            content_buffer = content_buffer[-(len(begin_marker) - 1) :]
+                        # No begin marker yet - keep buffer for potential marker detection
+                        # Don't discard anything - we'll decide at the end if model uses markers
                         break
                 else:
                     # In final response - look for end marker
@@ -764,6 +764,7 @@ class LLMServer:
                         done = chunk_data.get("done", False)
 
                         if content:
+                            full_content += content  # Always track full content
                             content_buffer += content
                             yield from process_buffered_content()
 
@@ -784,17 +785,24 @@ class LLMServer:
                             content = delta.get("content", "")
 
                             if content:
+                                full_content += content  # Always track full content
                                 content_buffer += content
                                 yield from process_buffered_content()
 
             # Flush any remaining buffered content
-            if content_buffer and in_final_response:
-                # Remove any trailing end marker if present
-                if content_buffer.endswith(end_marker):
-                    content_buffer = content_buffer[: -len(end_marker)]
-                content_buffer = content_buffer.rstrip()
+            if found_markers:
+                # Model uses thinker markers - flush any remaining content from marker processing
                 if content_buffer:
-                    yield make_chunk(content_buffer)
+                    if in_final_response:
+                        # Remove any trailing end marker if present
+                        if content_buffer.endswith(end_marker):
+                            content_buffer = content_buffer[: -len(end_marker)]
+                        content_buffer = content_buffer.rstrip()
+                    if content_buffer:
+                        yield make_chunk(content_buffer)
+            elif full_content:
+                # Model doesn't use thinker markers - output all accumulated content
+                yield make_chunk(full_content)
 
             # Final chunk with finish_reason
             final_chunk = {

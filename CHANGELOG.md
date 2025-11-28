@@ -19,9 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removes nav, footer, sidebar, TOC elements that may remain after readability extraction
   - Especially useful when fallback to `<main>`/`<article>` tags or original HTML is used
 
+- **Thinker Model Streaming** - Fix content loss when model doesn't use markers
+  - Previously, if a model didn't output `[BEGIN FINAL RESPONSE]` markers, content was discarded
+  - Now tracks full content and outputs it if no markers are found
+  - Fixes streaming for models that don't follow thinker marker protocol
+
 ### Changed
 - Improved hybrid search debug logging with expected candidate counts
 - Updated RAGConfig docstring to reflect correct parameter names
+
+### Documentation
+- Expanded README RAG section with architecture overview and detailed feature descriptions
+- Clarified RRF (Reciprocal Rank Fusion) weight behavior in hybrid search examples
 
 ## [0.7.1] - 2025-11-28
 
