@@ -206,6 +206,14 @@ config = ServerConfig.from_env("MYAPP_")
 - `json`: Machine-parseable, one JSON object per log entry (use with `jq`)
 - `yaml`: Human-readable structured format with literal blocks for multiline
 
+**Log event types** (all events respect `DEBUG_LOG_FORMAT`):
+- `request_started` / `request_completed`: API request lifecycle
+- `backend_call`: Backend LLM calls with timing
+- `tool_call` / `tool_error` / `tool_not_found`: Tool execution events
+- `tool_loop_iteration` / `tool_loop_timeout` / `tool_loop_max_iterations`: Tool loop events
+- `backend_model_changed`: Model configuration changes
+- `unhandled_exception`: Error events
+
 Example JSON log parsing:
 ```bash
 # Filter by tool name
@@ -213,6 +221,9 @@ cat tools_debug.log | jq 'select(.tool == "doc_search")'
 
 # Find slow tool calls (>5 seconds)
 cat tools_debug.log | jq 'select(.duration_ms > 5000)'
+
+# Filter by event type
+cat tools_debug.log | jq 'select(.event == "request_completed")'
 
 # Get full responses without truncation
 DEBUG_LOG_FORMAT=json DEBUG_LOG_MAX_RESPONSE_LENGTH=0
@@ -381,4 +392,4 @@ When making changes, test in both projects.
 ---
 
 *Last updated: 2025-11-28*
-*Version: 0.7.3*
+*Version: 0.7.5*

@@ -131,6 +131,62 @@ class LLMServer:
         # Register routes
         self._register_routes()
 
+    def _log_event(
+        self,
+        level: str,
+        event: str,
+        message: str,
+        **extra_fields: Any,
+    ):
+        """Log an event in the configured format (text, json, or yaml).
+
+        This is the central logging method that respects DEBUG_LOG_FORMAT.
+        All logging should go through this method to ensure consistent formatting.
+
+        Args:
+            level: Log level ("debug", "info", "warning", "error")
+            event: Event type (e.g., "request_started", "tool_call", "backend_call")
+            message: Human-readable message for text format
+            **extra_fields: Additional fields to include in structured formats
+        """
+        log_format = self.config.DEBUG_LOG_FORMAT
+        log_func = getattr(self.logger, level.lower(), self.logger.info)
+
+        if log_format == "json":
+            import datetime
+
+            log_entry = {
+                "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                "level": level.upper(),
+                "event": event,
+                "message": message,
+                **extra_fields,
+            }
+            log_func(json.dumps(log_entry, ensure_ascii=False, default=str))
+
+        elif log_format == "yaml":
+            import datetime
+
+            timestamp = datetime.datetime.now(datetime.UTC).isoformat()
+            lines = [
+                "---",
+                f"timestamp: {timestamp}",
+                f"level: {level.upper()}",
+                f"event: {event}",
+                f"message: {json.dumps(message)}",
+            ]
+            for key, value in extra_fields.items():
+                if isinstance(value, str) and "\n" in value:
+                    lines.append(f"{key}: |")
+                    for line in value.split("\n"):
+                        lines.append(f"  {line}")
+                else:
+                    lines.append(f"{key}: {json.dumps(value, default=str)}")
+            log_func("\n".join(lines))
+
+        else:  # text format (default)
+            log_func(message)
+
     def _log_tool_event(
         self,
         event: str,
@@ -329,7 +385,14 @@ class LLMServer:
             result = call_lmstudio(messages, self.tools, self.config, temperature, stream)
         if not stream:
             duration = time.time() - start_time
-            self.logger.info(f"Backend call: {self.config.BACKEND_TYPE}/{self.config.BACKEND_MODEL} in {duration:.2f}s")
+            self._log_event(
+                "info",
+                "backend_call",
+                f"Backend call: {self.config.BACKEND_TYPE}/{self.config.BACKEND_MODEL} in {duration:.2f}s",
+                backend=self.config.BACKEND_TYPE,
+                model=self.config.BACKEND_MODEL,
+                duration_s=round(duration, 2),
+            )
         return result
 
     def _extract_message_and_tool_calls(self, response_data: dict) -> tuple[dict, list]:
@@ -401,11 +464,21 @@ class LLMServer:
                                 },
                             }
                         )
-                    self.logger.debug(f"Parsed {len(tool_calls)} embedded tool calls")
+                    self._log_event(
+                        "debug",
+                        "thinker_tool_calls_parsed",
+                        f"Parsed {len(tool_calls)} embedded tool calls",
+                        tool_call_count=len(tool_calls),
+                    )
                     # Remove tool_calls tag from content since we're returning them separately
                     final_content = re.sub(r"<tool_calls>.*?</tool_calls>", "", final_content, flags=re.DOTALL).strip()
                 except (json.JSONDecodeError, KeyError, TypeError) as e:
-                    self.logger.warning(f"Failed to parse embedded tool calls: {e}")
+                    self._log_event(
+                        "warning",
+                        "thinker_tool_calls_parse_error",
+                        f"Failed to parse embedded tool calls: {e}",
+                        error=str(e),
+                    )
 
         return final_content, tool_calls
 
@@ -487,10 +560,22 @@ class LLMServer:
         while iteration < max_iterations:
             # Check timeout (if enabled)
             if timeout > 0 and (time.time() - tool_loop_start) > timeout:
-                self.logger.warning(f"[TOOL LOOP] TIMEOUT after {timeout}s. Tools used: {tools_used}")
+                self._log_event(
+                    "warning",
+                    "tool_loop_timeout",
+                    f"[TOOL LOOP] TIMEOUT after {timeout}s. Tools used: {tools_used}",
+                    timeout_s=timeout,
+                    tools_used=tools_used,
+                )
                 break
             iteration += 1
-            self.logger.debug(f"[TOOL LOOP] Iteration {iteration}/{max_iterations}")
+            self._log_event(
+                "debug",
+                "tool_loop_iteration",
+                f"[TOOL LOOP] Iteration {iteration}/{max_iterations}",
+                iteration=iteration,
+                max_iterations=max_iterations,
+            )
 
             # Call the backend with timeout handling
             try:
@@ -590,7 +675,13 @@ class LLMServer:
         # Tool loop limit reached (timeout or max iterations) - force a final response
         # Log which limit was hit (timeout was logged above via break, max iterations below)
         if iteration >= max_iterations:
-            self.logger.warning(f"[TOOL LOOP] MAX ITERATIONS REACHED ({max_iterations}). Tools used: {tools_used}")
+            self._log_event(
+                "warning",
+                "tool_loop_max_iterations",
+                f"[TOOL LOOP] MAX ITERATIONS REACHED ({max_iterations}). Tools used: {tools_used}",
+                max_iterations=max_iterations,
+                tools_used=tools_used,
+            )
 
         # Generate final response by calling backend WITHOUT tools
         # This forces the LLM to produce a text response rather than more tool calls
@@ -608,15 +699,20 @@ class LLMServer:
             temperature: Sampling temperature
             tools_used: List of tool names used during the request
         """
-        self.logger.info("[TOOL LOOP] Generating final response without tools")
+        self._log_event(
+            "info",
+            "tool_loop_final_response",
+            "[TOOL LOOP] Generating final response without tools",
+        )
 
         # Log full message history if debug tools is enabled
         if self.config.DEBUG_TOOLS:
-            import json
-
-            self.logger.debug(
-                f"[TOOL LOOP] Final response messages payload ({len(messages)} messages):\n"
-                + json.dumps(messages, indent=2, default=str)
+            self._log_event(
+                "debug",
+                "tool_loop_messages_payload",
+                f"[TOOL LOOP] Final response messages payload ({len(messages)} messages)",
+                message_count=len(messages),
+                messages=messages,
             )
 
         # Call backend WITHOUT tools to force a text response
@@ -644,7 +740,13 @@ class LLMServer:
             response_data = response.json()
         except (requests.Timeout, requests.ConnectionError) as e:
             # If we can't get a final response, return a fallback message
-            self.logger.error(f"[TOOL LOOP] Failed to generate final response: {e}")
+            self._log_event(
+                "error",
+                "tool_loop_final_response_error",
+                f"[TOOL LOOP] Failed to generate final response: {e}",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return {
                 "id": f"chatcmpl-{int(time.time())}",
                 "object": "chat.completion",
@@ -856,7 +958,14 @@ class LLMServer:
         iteration = 0
         while iteration < max_iterations:
             iteration += 1
-            self.logger.debug(f"[TOOL LOOP] Iteration {iteration}/{max_iterations}")
+            self._log_event(
+                "debug",
+                "tool_loop_iteration",
+                f"[TOOL LOOP] Iteration {iteration}/{max_iterations}",
+                iteration=iteration,
+                max_iterations=max_iterations,
+                streaming=True,
+            )
 
             # Call backend without streaming to check for tool calls
             try:
@@ -890,7 +999,13 @@ class LLMServer:
             full_messages.extend(tool_results)
 
         # Max iterations reached
-        self.logger.warning(f"[TOOL LOOP] MAX ITERATIONS REACHED ({max_iterations}) in streaming mode")
+        self._log_event(
+            "warning",
+            "tool_loop_max_iterations",
+            f"[TOOL LOOP] MAX ITERATIONS REACHED ({max_iterations}) in streaming mode",
+            max_iterations=max_iterations,
+            streaming=True,
+        )
         yield from self._yield_error_chunk(
             "I apologize, but I've reached the maximum number of tool calling iterations."
         )
@@ -924,7 +1039,13 @@ class LLMServer:
 
         old_model = self.config.BACKEND_MODEL
         self.config.BACKEND_MODEL = new_model
-        self.logger.info(f"Backend model changed: {old_model} -> {new_model}")
+        self._log_event(
+            "info",
+            "backend_model_changed",
+            f"Backend model changed: {old_model} -> {new_model}",
+            previous_model=old_model,
+            current_model=new_model,
+        )
 
         return jsonify(
             {
@@ -977,7 +1098,14 @@ class LLMServer:
             temperature = data.get("temperature", self.config.DEFAULT_TEMPERATURE)
             stream = data.get("stream", False)
 
-            self.logger.info(f"Request: {len(messages)} messages, stream={stream}, temp={temperature}")
+            self._log_event(
+                "info",
+                "request_started",
+                f"Request: {len(messages)} messages, stream={stream}, temp={temperature}",
+                message_count=len(messages),
+                stream=stream,
+                temperature=temperature,
+            )
 
             if stream:
                 return Response(
@@ -990,7 +1118,13 @@ class LLMServer:
                 result["model"] = self.model_name
                 duration = time.time() - start_time
                 tools_used = result.get("tools_used", [])
-                self.logger.info(f"Completed in {duration:.2f}s, tools={tools_used}")
+                self._log_event(
+                    "info",
+                    "request_completed",
+                    f"Completed in {duration:.2f}s, tools={tools_used}",
+                    duration_s=round(duration, 2),
+                    tools_used=tools_used,
+                )
                 return jsonify(result)
 
         except Exception as e:
@@ -1003,7 +1137,14 @@ class LLMServer:
             # Add traceback in debug mode
             if self.config.DEBUG_TOOLS:
                 error_details["traceback"] = traceback.format_exc()
-                self.logger.error(f"Unhandled exception in chat_completions:\n{traceback.format_exc()}")
+                self._log_event(
+                    "error",
+                    "unhandled_exception",
+                    f"Unhandled exception in chat_completions: {type(e).__name__}: {e!s}",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    traceback=traceback.format_exc(),
+                )
 
             return jsonify(error_details), 500
 
