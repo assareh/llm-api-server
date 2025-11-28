@@ -23,10 +23,10 @@ class RAGConfig:
         url_exclude_patterns: List of regex patterns - skip matching URLs
 
         # Chunking settings
-        child_chunk_size: Target tokens per child chunk (default: 350)
-        child_chunk_overlap: Overlap tokens between child chunks (default: 50)
-        parent_chunk_size: Target tokens per parent chunk (default: 900)
-        parent_chunk_overlap: Overlap tokens between parent chunks (default: 100)
+        child_chunk_min_tokens: Minimum tokens for child chunks (default: 150)
+        child_chunk_size: Maximum tokens per child chunk (default: 350)
+        parent_chunk_min_tokens: Minimum tokens for parent chunks (default: 300)
+        parent_chunk_size: Maximum tokens per parent chunk (default: 900)
         absolute_max_chunk_tokens: Hard limit for any chunk (default: 1200). Content exceeding this is split.
 
         # Search settings
@@ -64,10 +64,10 @@ class RAGConfig:
     url_exclude_patterns: list[str] = field(default_factory=list)
 
     # Chunking settings
-    child_chunk_size: int = 350
-    child_chunk_overlap: int = 50
-    parent_chunk_size: int = 900
-    parent_chunk_overlap: int = 100
+    child_chunk_min_tokens: int = 150  # Minimum tokens for child chunks
+    child_chunk_size: int = 350  # Maximum tokens for child chunks
+    parent_chunk_min_tokens: int = 300  # Minimum tokens for parent chunks
+    parent_chunk_size: int = 900  # Maximum tokens for parent chunks
     absolute_max_chunk_tokens: int = 1200  # Hard limit - split any content exceeding this
 
     # Search settings (uses Reciprocal Rank Fusion, not weighted average)

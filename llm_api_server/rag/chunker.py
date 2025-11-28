@@ -115,8 +115,13 @@ def semantic_chunk_html(
     """
     soup = BeautifulSoup(html, "html.parser")
 
-    # HTML is already cleaned by readability, so just use the body directly
-    # (Readability extracts main content and removes nav, headers, footers, ads, etc.)
+    # Remove boilerplate elements that may remain after readability extraction
+    # (especially when fallback to <main>/<article> tags or original HTML is used)
+    for selector in BOILERPLATE_SELECTORS:
+        for element in soup.select(selector):
+            element.decompose()
+
+    # Use the body or the full soup as the content container
     content_container = soup.body or soup
 
     if not content_container:

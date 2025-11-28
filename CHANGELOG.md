@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2025-11-28
+
+### Fixed
+- **RAG Chunking Config** - Wire up previously unused config parameters
+  - Added `child_chunk_min_tokens` (default: 150) - configurable minimum for child chunks
+  - Added `parent_chunk_min_tokens` (default: 300) - configurable minimum for parent chunks
+  - Removed unused `child_chunk_overlap` and `parent_chunk_overlap` parameters
+  - Semantic chunker uses heading-based sectioning, not sliding-window overlap
+
+- **RAG Boilerplate Removal** - Apply boilerplate selectors in chunker
+  - Previously defined `BOILERPLATE_SELECTORS` are now applied before chunking
+  - Removes nav, footer, sidebar, TOC elements that may remain after readability extraction
+  - Especially useful when fallback to `<main>`/`<article>` tags or original HTML is used
+
+### Changed
+- Improved hybrid search debug logging with expected candidate counts
+- Updated RAGConfig docstring to reflect correct parameter names
+
 ## [0.7.1] - 2025-11-28
 
 ### Added

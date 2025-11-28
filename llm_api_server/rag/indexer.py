@@ -412,9 +412,15 @@ class DocSearchIndex:
         logger.debug(f"[RAG] Searching for: {query}")
 
         # Get initial candidates from hybrid search
+        # Each retriever returns search_top_k * retriever_candidate_multiplier candidates
+        # which are then fused using Reciprocal Rank Fusion (RRF)
+        expected_candidates = self.config.search_top_k * self.config.retriever_candidate_multiplier
         candidates = self.ensemble_retriever.invoke(query)
 
-        logger.debug(f"[RAG] Retrieved {len(candidates)} candidates from hybrid search")
+        logger.debug(
+            f"[RAG] Retrieved {len(candidates)} candidates from hybrid search "
+            f"(expected ~{expected_candidates} per retriever before RRF deduplication)"
+        )
 
         # Convert to result format
         results = []
@@ -708,9 +714,9 @@ class DocSearchIndex:
                 result = semantic_chunk_html(
                     html=page["html"],
                     url=page["url"],
-                    child_min_tokens=150,
+                    child_min_tokens=self.config.child_chunk_min_tokens,
                     child_max_tokens=self.config.child_chunk_size,
-                    parent_min_tokens=self.config.parent_chunk_size // 3,
+                    parent_min_tokens=self.config.parent_chunk_min_tokens,
                     parent_max_tokens=self.config.parent_chunk_size,
                     absolute_max_tokens=self.config.absolute_max_chunk_tokens,
                 )
