@@ -109,10 +109,13 @@ def call_ollama(
         "stream": stream,
     }
 
-    # Only include tools if we have them and tool_choice is not "none"
-    if openai_tools and tool_choice != "none":
+    # Handle tools and tool_choice
+    if tool_choice == "none":
+        # Explicitly send tool_choice="none" to prevent tool calls (e.g., for final response generation)
+        payload["tool_choice"] = "none"
+    elif openai_tools:
+        # Include tools and optionally tool_choice when tools are available
         payload["tools"] = openai_tools
-        # Set tool_choice if specified
         if tool_choice:
             payload["tool_choice"] = tool_choice
 
@@ -166,10 +169,13 @@ def call_lmstudio(
         "stream": stream,
     }
 
-    # Only include tools if we have them and tool_choice is not "none"
-    if openai_tools and tool_choice != "none":
+    # Handle tools and tool_choice
+    if tool_choice == "none":
+        # Explicitly send tool_choice="none" to prevent tool calls (e.g., for final response generation)
+        payload["tool_choice"] = "none"
+    elif openai_tools:
+        # Include tools and optionally tool_choice when tools are available
         payload["tools"] = openai_tools
-        # Set tool_choice if specified (LM Studio supports "required", "auto", "none")
         if tool_choice:
             payload["tool_choice"] = tool_choice
 
