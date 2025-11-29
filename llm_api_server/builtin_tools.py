@@ -248,6 +248,52 @@ def create_doc_search_tool(
     )
 
 
+class AgenticSearchInput(BaseModel):
+    """Input schema for agentic text search tool."""
+
+    query: str = Field(
+        description=(
+            "Search query with optional OR patterns for synonyms. "
+            "Examples: 'authentication', 'auth OR login OR oauth', '\"exact phrase\"'"
+        )
+    )
+
+
+def create_agentic_search_tools(
+    cache_dir: str,
+    name_prefix: str = "docs",
+) -> list[Tool]:
+    """Create tools for agentic document search (Simon Willison's approach).
+
+    This is an alternative to RAG that uses simple text search and lets the LLM
+    iterate with query refinement. No embeddings or chunking needed.
+
+    Returns 3 tools:
+    - {prefix}_search: Search with keywords/OR patterns/regex
+    - {prefix}_list: List available documents
+    - {prefix}_read: Read full content of a document
+
+    Args:
+        cache_dir: Directory containing cached documents (from DocumentCrawler)
+        name_prefix: Prefix for tool names (default: "docs")
+
+    Returns:
+        List of LangChain Tools
+
+    Example:
+        >>> tools = create_agentic_search_tools("./doc_cache")
+        >>> # LLM can iterate:
+        >>> # 1. docs_search("authentication")
+        >>> # 2. docs_search("auth OR login OR SSO")
+        >>> # 3. docs_read("Authentication Guide")
+    """
+    from .rag.agentic_search import AgenticSearchConfig
+    from .rag.agentic_search import create_agentic_search_tools as _create_tools
+
+    config = AgenticSearchConfig(cache_dir=cache_dir)
+    return _create_tools(config, name_prefix=name_prefix)
+
+
 # Collection of all built-in tools
 BUILTIN_TOOLS = [
     get_current_datetime,
@@ -257,9 +303,11 @@ BUILTIN_TOOLS = [
 
 __all__ = [
     "BUILTIN_TOOLS",
+    "AgenticSearchInput",
     "DocSearchInput",
     "WebSearchInput",
     "calculate",
+    "create_agentic_search_tools",
     "create_doc_search_tool",
     "create_web_search_tool",
     "get_current_datetime",
