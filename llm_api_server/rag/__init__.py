@@ -5,19 +5,23 @@ This module provides local RAG capabilities with:
 - Semantic HTML-aware chunking with parent-child relationships
 - Hybrid search (BM25 + semantic vector search)
 - Cross-encoder re-ranking
+- Contextual retrieval (Anthropic's approach for ~40-50% fewer retrieval failures)
 - Incremental index updates
 - FAISS vector storage (CPU-optimized, local)
 
 Example usage:
     from llm_api_server.rag import DocSearchIndex, RAGConfig
 
-    # Configure RAG
+    # Configure RAG with contextual retrieval
     config = RAGConfig(
         base_url="https://docs.example.com",
         cache_dir="./doc_index",
+        # Enable contextual retrieval (requires local Ollama)
+        contextual_retrieval_enabled=True,
+        contextual_model="llama3.2",
     )
 
-    # Build index
+    # Build index (includes context generation)
     index = DocSearchIndex(config)
     index.crawl_and_index()
 
@@ -26,9 +30,11 @@ Example usage:
 """
 
 from .config import RAGConfig
+from .contextualizer import ChunkContextualizer
 from .indexer import DocSearchIndex
 
 __all__ = [
+    "ChunkContextualizer",
     "DocSearchIndex",
     "RAGConfig",
 ]

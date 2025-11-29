@@ -43,6 +43,14 @@ class RAGConfig:
         embedding_model: HuggingFace embedding model name
         rerank_model: Cross-encoder model for re-ranking
 
+        # Contextual retrieval settings (Anthropic's approach)
+        contextual_retrieval_enabled: Enable LLM-generated context prepended to chunks
+        contextual_ollama_base_url: Ollama API endpoint for context generation
+        contextual_model: Ollama model name for context generation
+        contextual_max_workers: Number of parallel context generation workers
+        contextual_timeout: Timeout per context generation request in seconds
+        contextual_prompt: Prompt template for context generation ({document} and {chunk} placeholders)
+
         # Index settings
         update_check_interval_hours: Hours between index update checks (default: 168 = 7 days)
         page_cache_ttl_hours: TTL for cached pages without lastmod (default: 168 = 7 days, 0 = never expire).
@@ -82,8 +90,26 @@ class RAGConfig:
     parent_context_max_chars: int = 500  # Max chars for parent context in tool results (0 = no limit)
 
     # Model settings
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_model: str = "BAAI/bge-large-en-v1.5"  # Strong open-source model on MTEB leaderboard
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-12-v2"
+
+    # Contextual retrieval settings (Anthropic's approach for ~40-50% fewer retrieval failures)
+    # See: https://www.anthropic.com/news/contextual-retrieval
+    contextual_retrieval_enabled: bool = False  # Enable LLM-generated context for chunks
+    contextual_ollama_base_url: str = "http://localhost:11434"  # Ollama API endpoint
+    contextual_model: str = "llama3.2"  # Local Ollama model for context generation
+    contextual_max_workers: int = 4  # Parallel context generation workers
+    contextual_timeout: float = 60.0  # Timeout per context generation request
+    contextual_prompt: str = """<document>
+{document}
+</document>
+
+Here is the chunk we want to situate within the whole document:
+<chunk>
+{chunk}
+</chunk>
+
+Please give a short succinct context (2-3 sentences) to situate this chunk within the overall document for the purposes of improving search retrieval of the chunk. Respond only with the context, nothing else."""
 
     # Index settings
     update_check_interval_hours: int = 168  # 7 days

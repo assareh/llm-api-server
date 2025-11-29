@@ -310,27 +310,39 @@ The framework includes a comprehensive RAG system in `llm_api_server/rag/`:
 - `DocSearchIndex` - Main indexer with crawling, chunking, embedding, and search
 - `RAGConfig` - Configuration dataclass with all settings
 - `DocumentCrawler` - Web crawler (sitemap + recursive + manual URLs)
+- `ChunkContextualizer` - LLM-generated context for chunks (Anthropic's approach)
 - `semantic_chunk_html()` - HTML-aware chunking with parent-child relationships
 
 **Features:**
 - **Three crawling modes**: Sitemap (auto-discover) → Recursive (fallback) → Manual (explicit)
 - **Semantic HTML chunking** - Respects document structure (headings, code, tables)
 - **Parent-child chunks** - Hierarchical relationships for context
+- **Contextual retrieval** - LLM-generated context prepended to chunks (~40-50% fewer failures)
 - **Hybrid search** - BM25 + semantic via Reciprocal Rank Fusion (RRF)
 - **Cross-encoder re-ranking** - MS MARCO model for accurate final ordering
 - **Incremental updates** - Check timestamps, only rebuild if stale
-- **Local-first** - FAISS vector store, HuggingFace embeddings (all-MiniLM-L6-v2)
+- **Local-first** - FAISS vector store, HuggingFace embeddings (BAAI/bge-large-en-v1.5)
+
+**Contextual Retrieval:**
+Implements [Anthropic's Contextual Retrieval](https://www.anthropic.com/news/contextual-retrieval) approach:
+- Uses local LLM (Ollama) to generate context for each chunk
+- Context situates the chunk within the overall document
+- Prepended to chunk content before embedding AND BM25 indexing
+- Reduces retrieval failures by ~40-50% on top of hybrid search + reranking
+- One-time cost during indexing, cached for future use
 
 **Architecture:**
 1. **Crawler** discovers URLs (sitemap XML parsing, recursive link following, or manual list)
 2. **Chunker** processes HTML into parent-child chunks using heading hierarchy
-3. **Indexer** generates embeddings and builds FAISS + BM25 indexes
-4. **Searcher** uses ensemble retriever (hybrid) + cross-encoder re-ranking
+3. **Contextualizer** (optional) generates LLM context for each chunk
+4. **Indexer** generates embeddings and builds FAISS + BM25 indexes
+5. **Searcher** uses ensemble retriever (hybrid) + cross-encoder re-ranking
 
 **Key files:**
-- `config.py` - RAGConfig with all crawling/chunking/search settings
+- `config.py` - RAGConfig with all crawling/chunking/search/contextual settings
 - `crawler.py` - DocumentCrawler class, robots.txt support, URL filtering
 - `chunker.py` - semantic_chunk_html(), token-aware chunking with tiktoken
+- `contextualizer.py` - ChunkContextualizer, LLM context generation with caching
 - `indexer.py` - DocSearchIndex main class
 
 **Usage:**
@@ -340,6 +352,9 @@ from llm_api_server.rag import DocSearchIndex, RAGConfig
 config = RAGConfig(
     base_url="https://docs.example.com",
     cache_dir="./doc_index",
+    # Enable contextual retrieval (requires local Ollama)
+    contextual_retrieval_enabled=True,
+    contextual_model="llama3.2",  # Or any Ollama model
     # Hybrid search uses Reciprocal Rank Fusion (RRF), not weighted average.
     # These weights scale rank contributions: 0.7/0.3 means semantic ranks
     # are weighted ~2.3x more than BM25 ranks in the fusion formula.
@@ -348,15 +363,24 @@ config = RAGConfig(
 )
 
 index = DocSearchIndex(config)
-index.crawl_and_index()  # Normal update
+index.crawl_and_index()  # Normal update (generates context if enabled)
 index.crawl_and_index(force_refresh=True)  # Refetch all cached pages
 results = index.search("query", top_k=5)
 ```
+
+**Contextual Retrieval Config Options:**
+- `contextual_retrieval_enabled`: Enable LLM context generation (default: False)
+- `contextual_ollama_base_url`: Ollama endpoint (default: "http://localhost:11434")
+- `contextual_model`: Ollama model name (default: "llama3.2")
+- `contextual_max_workers`: Parallel context generation (default: 4)
+- `contextual_timeout`: Timeout per request in seconds (default: 60)
+- `contextual_prompt`: Custom prompt template (uses {document} and {chunk} placeholders)
 
 **Cache Invalidation:**
 - Pages with sitemap `lastmod`: invalidated when date changes
 - Pages without `lastmod`: invalidated after `page_cache_ttl_hours` (default: 7 days)
 - `force_refresh=True`: bypasses all caching, refetches everything
+- Chunk contexts: cached by chunk_id + content hash, regenerated only when content changes
 
 **Ported from Ivan:**
 This module was generalized from Ivan's HashiCorp doc search implementation:
@@ -391,5 +415,5 @@ When making changes, test in both projects.
 
 ---
 
-*Last updated: 2025-11-28*
-*Version: 0.7.5*
+*Last updated: 2025-11-29*
+*Version: 0.8.0*

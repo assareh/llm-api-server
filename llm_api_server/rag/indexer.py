@@ -30,6 +30,7 @@ from sentence_transformers import CrossEncoder
 
 from .chunker import semantic_chunk_html
 from .config import RAGConfig
+from .contextualizer import ChunkContextualizer
 from .crawler import DocumentCrawler
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,9 @@ class DocSearchIndex:
             url_include_patterns=config.url_include_patterns,
             url_exclude_patterns=config.url_exclude_patterns,
         )
+
+        # Contextualizer for Anthropic's contextual retrieval approach
+        self.contextualizer = ChunkContextualizer(config, self.cache_dir)
 
     def needs_update(self) -> bool:
         """Check if index needs rebuilding.
@@ -354,13 +358,45 @@ class DocSearchIndex:
 
         # Create chunks from pages with fresh content only (not cached pages)
         new_chunk_count_before = len(self.chunks)
-        self._create_chunks(pages_to_chunk)
+        page_contents = self._create_chunks(pages_to_chunk)
         new_chunk_count = len(self.chunks) - new_chunk_count_before
 
         logger.info(
             f"[RAG] Created {new_chunk_count} new child chunks from {len(pages_to_chunk)} pages in {time.time() - start_time:.1f}s"
         )
         logger.info(f"[RAG] Total chunks: {len(self.chunks)} child chunks, {len(self.parent_chunks)} parent chunks")
+
+        # Phase 3.5: Contextual retrieval (if enabled)
+        if self.config.contextual_retrieval_enabled and new_chunk_count > 0:
+            logger.info("[RAG] Phase 3.5/4: Applying contextual retrieval...")
+            start_time = time.time()
+
+            # Convert chunks to dict format for contextualizer
+            chunk_dicts = [
+                {
+                    "chunk_id": chunk.metadata.get("chunk_id"),
+                    "content": chunk.page_content,
+                    "url": chunk.metadata.get("url"),
+                    "metadata": chunk.metadata,
+                }
+                for chunk in self.chunks[new_chunk_count_before:]  # Only new chunks
+            ]
+
+            # Generate and apply contextual prefixes
+            contextualized = self.contextualizer.contextualize_chunks(chunk_dicts, page_contents)
+
+            # Update chunks with contextualized content
+            for i, ctx_chunk in enumerate(contextualized):
+                idx = new_chunk_count_before + i
+                self.chunks[idx] = Document(
+                    page_content=ctx_chunk["content"],
+                    metadata={
+                        **self.chunks[idx].metadata,
+                        "original_content": ctx_chunk.get("original_content", ctx_chunk["content"]),
+                    },
+                )
+
+            logger.info(f"[RAG] Contextual retrieval complete in {time.time() - start_time:.1f}s")
 
         # Save chunks
         self._save_chunks()
@@ -810,7 +846,34 @@ class DocSearchIndex:
         except Exception as e:
             logger.warning(f"[RAG] Failed to cache page {page_data['url']}: {e}")
 
-    def _create_chunks(self, pages: list[dict[str, Any]]):
+    def _extract_page_text(self, html: str) -> str:
+        """Extract plain text from HTML for contextual retrieval.
+
+        Args:
+            html: HTML content
+
+        Returns:
+            Plain text content
+        """
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+
+            # Remove script and style elements
+            for element in soup(["script", "style", "nav", "footer", "header"]):
+                element.decompose()
+
+            # Get text with reasonable spacing
+            text = soup.get_text(separator=" ", strip=True)
+
+            # Clean up excessive whitespace
+            text = " ".join(text.split())
+
+            return text
+        except Exception as e:
+            logger.warning(f"[RAG] Failed to extract text from HTML: {e}")
+            return ""
+
+    def _create_chunks(self, pages: list[dict[str, Any]]) -> dict[str, str]:
         """Create parent-child chunks from pages using semantic HTML chunking.
 
         Appends new chunks to existing ones (for incremental updates).
@@ -818,6 +881,9 @@ class DocSearchIndex:
 
         Args:
             pages: List of page data dicts with HTML
+
+        Returns:
+            Dict mapping URL -> plain text content (for contextual retrieval)
         """
         # Don't reset - append to existing chunks for incremental updates
         # (caller sets self.chunks to [] for full rebuild or existing chunks for incremental)
@@ -840,7 +906,12 @@ class DocSearchIndex:
         if duplicates_skipped > 0:
             logger.info(f"[RAG] Deduplicated {duplicates_skipped} pages with identical content")
 
+        # Extract page text content for contextual retrieval
+        page_contents: dict[str, str] = {}
+
         for idx, page in enumerate(deduplicated_pages, 1):
+            # Extract plain text for contextual retrieval
+            page_contents[page["url"]] = self._extract_page_text(page["html"])
             try:
                 # Use semantic chunking
                 result = semantic_chunk_html(
@@ -929,6 +1000,8 @@ class DocSearchIndex:
             except Exception as e:
                 logger.error(f"[RAG] Failed to chunk {page['url']}: {e}")
                 continue
+
+        return page_contents
 
     def _build_index(self):
         """Build FAISS vector index and retrievers."""
