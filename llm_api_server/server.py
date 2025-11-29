@@ -550,6 +550,9 @@ class LLMServer:
         if max_iterations is None:
             max_iterations = self.config.MAX_TOOL_ITERATIONS
 
+        # Reset retry flag for tool_choice=required nudge (only retry once per request)
+        self._tool_required_retry_done = False
+
         # Add system prompt
         system_prompt = self.get_system_prompt()
         full_messages = [{"role": "system", "content": system_prompt}] + messages
@@ -658,6 +661,23 @@ class LLMServer:
 
             # Extract message and tool calls from response
             message, tool_calls = self._extract_message_and_tool_calls(response_data)
+
+            # Retry once if tool_choice was "required" but model didn't call any tools
+            if not tool_calls and tool_choice == "required" and not getattr(self, "_tool_required_retry_done", False):
+                self._tool_required_retry_done = True
+                self._log_event(
+                    "warning",
+                    "tool_choice_required_ignored",
+                    "[TOOL LOOP] tool_choice=required was ignored by model, retrying with nudge",
+                    iteration=iteration,
+                )
+                # Add a nudge message to encourage tool use
+                nudge_message = {
+                    "role": "user",
+                    "content": "Please use one of the available tools to help answer this question.",
+                }
+                full_messages.append(nudge_message)
+                continue  # Retry this iteration
 
             if not tool_calls:
                 # No tool calls - return final response using the cleaned message
