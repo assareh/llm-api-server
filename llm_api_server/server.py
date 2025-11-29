@@ -377,13 +377,22 @@ class LLMServer:
 
         return not_found_msg
 
-    def call_backend(self, messages: list[dict], temperature: float, stream: bool = False):
-        """Call the configured backend."""
+    def call_backend(
+        self, messages: list[dict], temperature: float, stream: bool = False, tool_choice: str | None = None
+    ):
+        """Call the configured backend.
+
+        Args:
+            messages: List of chat messages
+            temperature: Sampling temperature
+            stream: Whether to stream the response
+            tool_choice: Tool calling mode - "required", "auto", or "none"
+        """
         start_time = time.time()
         if self.config.BACKEND_TYPE == "ollama":
-            result = call_ollama(messages, self.tools, self.config, temperature, stream)
+            result = call_ollama(messages, self.tools, self.config, temperature, stream, tool_choice)
         else:  # lmstudio
-            result = call_lmstudio(messages, self.tools, self.config, temperature, stream)
+            result = call_lmstudio(messages, self.tools, self.config, temperature, stream, tool_choice)
         if not stream:
             duration = time.time() - start_time
             self._log_event(
@@ -565,17 +574,23 @@ class LLMServer:
                 )
                 break
             iteration += 1
+            # Determine tool_choice based on iteration:
+            # - First iteration: configurable (default "auto")
+            # - Subsequent iterations: always "auto" to let model decide
+            tool_choice = self.config.FIRST_ITERATION_TOOL_CHOICE if iteration == 1 else "auto"
+
             self._log_event(
                 "debug",
                 "tool_loop_iteration",
-                f"[TOOL LOOP] Iteration {iteration}/{max_iterations}",
+                f"[TOOL LOOP] Iteration {iteration}/{max_iterations} (tool_choice={tool_choice})",
                 iteration=iteration,
                 max_iterations=max_iterations,
+                tool_choice=tool_choice,
             )
 
             # Call the backend with timeout handling
             try:
-                response = self.call_backend(full_messages, temperature, stream=False)
+                response = self.call_backend(full_messages, temperature, stream=False, tool_choice=tool_choice)
                 response_data = response.json()
             except requests.Timeout:
                 backend_endpoint = (
@@ -719,7 +734,7 @@ class LLMServer:
         self._log_event(
             "info",
             "tool_loop_final_response",
-            "[TOOL LOOP] Generating final response without tools",
+            "[TOOL LOOP] Generating final response without tools (tool_choice=none)",
         )
 
         # Log full message history if debug tools is enabled
@@ -732,7 +747,7 @@ class LLMServer:
                 messages=messages,
             )
 
-        # Call backend WITHOUT tools to force a text response
+        # Call backend WITHOUT tools and with tool_choice="none" to force a text response
         try:
             if self.config.BACKEND_TYPE == "ollama":
                 from .backends import call_ollama
@@ -743,6 +758,7 @@ class LLMServer:
                     self.config,
                     temperature,
                     stream=False,
+                    tool_choice="none",  # Explicitly disable tool calls
                 )
             else:  # lmstudio
                 from .backends import call_lmstudio
@@ -753,6 +769,7 @@ class LLMServer:
                     self.config,
                     temperature,
                     stream=False,
+                    tool_choice="none",  # Explicitly disable tool calls
                 )
             response_data = response.json()
         except (requests.Timeout, requests.ConnectionError) as e:

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2025-11-28
+
+### Added
+- **Tool Choice Support** - Control how models use tools via `tool_choice` parameter
+  - Supports `"auto"` (model decides), `"required"` (force tool use), and `"none"` (disable tools)
+  - New `FIRST_ITERATION_TOOL_CHOICE` config option (default: `"auto"`)
+  - Environment variable: `FIRST_ITERATION_TOOL_CHOICE=required` to force tools on first call
+  - Tool choice passed to backend and logged for debugging
+
+### Changed
+- **Ollama Backend** - Switched from native `/api/chat` to OpenAI-compatible `/v1/chat/completions` endpoint
+  - Enables full `tool_choice` support (native API didn't support this parameter)
+  - Response format now matches LM Studio (standard OpenAI format)
+  - Both backends now use nearly identical code paths
+- Tools are only sent to backend when `tool_choice != "none"` and tools exist
+- Final response generation explicitly uses `tool_choice="none"` to prevent tool calls
+
 ## [0.7.3] - 2025-11-28
 
 ### Added
