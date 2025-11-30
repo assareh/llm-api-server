@@ -46,12 +46,15 @@ class DocSearchIndex:
     # Class-level flag to ensure global configuration is only set once
     _global_config_applied = False
 
-    def __init__(self, config: RAGConfig):
+    def __init__(self, config: RAGConfig, server_config=None):
         """Initialize the document search index.
 
         Args:
             config: RAG configuration
+            server_config: Optional ServerConfig for backend settings (used by contextual retrieval).
+                          If using contextual retrieval, this provides the LLM backend config.
         """
+        self.server_config = server_config
         # Apply global configuration once per process
         if not DocSearchIndex._global_config_applied:
             # Suppress noisy "ruthless removal did not work" messages from readability library
@@ -107,7 +110,7 @@ class DocSearchIndex:
         )
 
         # Contextualizer for Anthropic's contextual retrieval approach
-        self.contextualizer = ChunkContextualizer(config, self.cache_dir)
+        self.contextualizer = ChunkContextualizer(config, self.cache_dir, server_config)
 
     def needs_update(self) -> bool:
         """Check if index needs rebuilding.

@@ -11,37 +11,91 @@ The context situates the chunk within the overall document, e.g.:
 It describes certificate authority setup options."
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
 
 from .config import RAGConfig
 
+if TYPE_CHECKING:
+    from llm_api_server.config import ServerConfig
+
 logger = logging.getLogger(__name__)
 
 
 class ChunkContextualizer:
-    """Generate and cache contextual prefixes for document chunks using local LLM."""
+    """Generate and cache contextual prefixes for document chunks using local LLM.
 
-    def __init__(self, config: RAGConfig, cache_dir: Path):
+    Uses the same backend (LM Studio or Ollama) configured for the main server,
+    or can be overridden via RAGConfig contextual_backend_* settings.
+    """
+
+    def __init__(self, config: RAGConfig, cache_dir: Path, server_config: ServerConfig | None = None):
         """Initialize the contextualizer.
 
         Args:
             config: RAG configuration with contextual retrieval settings
             cache_dir: Directory to cache contextualized chunks
+            server_config: Optional ServerConfig to use for backend settings.
+                          If not provided, RAGConfig contextual_* settings must be set.
         """
         self.config = config
+        self.server_config = server_config
         self.cache_dir = cache_dir
         self.context_cache_file = cache_dir / "chunk_contexts.json"
 
+        # Resolve backend settings (RAGConfig overrides take precedence, then ServerConfig)
+        self._resolve_backend_settings()
+
         # Load existing context cache
         self.context_cache: dict[str, str] = self._load_context_cache()
+
+    def _resolve_backend_settings(self):
+        """Resolve backend type, endpoint, and model from config hierarchy."""
+        # Backend type: RAGConfig override > ServerConfig > error
+        if self.config.contextual_backend_type:
+            self.backend_type = self.config.contextual_backend_type
+        elif self.server_config:
+            self.backend_type = self.server_config.BACKEND_TYPE
+        else:
+            self.backend_type = "ollama"  # Fallback default
+
+        # Backend endpoint: RAGConfig override > ServerConfig > defaults
+        if self.config.contextual_backend_endpoint:
+            self.backend_endpoint = self.config.contextual_backend_endpoint
+        elif self.server_config:
+            if self.backend_type == "lmstudio":
+                self.backend_endpoint = self.server_config.LMSTUDIO_ENDPOINT
+            else:
+                self.backend_endpoint = self.server_config.OLLAMA_ENDPOINT
+        else:
+            # Defaults if no server config
+            if self.backend_type == "lmstudio":
+                self.backend_endpoint = "http://localhost:1234/v1"
+            else:
+                self.backend_endpoint = "http://localhost:11434"
+
+        # Model: RAGConfig override > ServerConfig > error if enabled
+        if self.config.contextual_model:
+            self.model = self.config.contextual_model
+        elif self.server_config:
+            self.model = self.server_config.BACKEND_MODEL
+        else:
+            self.model = None  # Will error if contextual retrieval is enabled
+
+        if self.config.contextual_retrieval_enabled:
+            logger.info(
+                f"[RAG] Contextual retrieval using {self.backend_type} backend "
+                f"at {self.backend_endpoint} with model {self.model}"
+            )
 
     def contextualize_chunks(
         self,
@@ -168,7 +222,9 @@ class ChunkContextualizer:
                     )
 
     def _generate_single_context(self, chunk_content: str, document_content: str) -> str | None:
-        """Generate context for a single chunk using Ollama.
+        """Generate context for a single chunk using the configured backend.
+
+        Supports both LM Studio (OpenAI-compatible) and Ollama backends.
 
         Args:
             chunk_content: The chunk text to contextualize
@@ -184,19 +240,35 @@ class ChunkContextualizer:
         )
 
         try:
-            response = requests.post(
-                f"{self.config.contextual_ollama_base_url}/api/generate",
-                json={
-                    "model": self.config.contextual_model,
-                    "prompt": prompt,
-                    "stream": False,
-                },
-                timeout=self.config.contextual_timeout,
-            )
-            response.raise_for_status()
-
-            result = response.json()
-            context = result.get("response", "").strip()
+            if self.backend_type == "lmstudio":
+                # LM Studio uses OpenAI-compatible chat completions API
+                response = requests.post(
+                    f"{self.backend_endpoint}/chat/completions",
+                    json={
+                        "model": self.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.0,
+                        "stream": False,
+                    },
+                    timeout=self.config.contextual_timeout,
+                )
+                response.raise_for_status()
+                result = response.json()
+                context = result["choices"][0]["message"]["content"].strip()
+            else:
+                # Ollama uses its native /api/generate endpoint
+                response = requests.post(
+                    f"{self.backend_endpoint}/api/generate",
+                    json={
+                        "model": self.model,
+                        "prompt": prompt,
+                        "stream": False,
+                    },
+                    timeout=self.config.contextual_timeout,
+                )
+                response.raise_for_status()
+                result = response.json()
+                context = result.get("response", "").strip()
 
             # Basic validation - context should be reasonable length
             if len(context) < 10:
@@ -214,7 +286,7 @@ class ChunkContextualizer:
             logger.warning(f"[RAG] Context generation timed out after {self.config.contextual_timeout}s")
             return None
         except requests.exceptions.RequestException as e:
-            logger.error(f"[RAG] Ollama request failed: {e}")
+            logger.error(f"[RAG] Backend request failed: {e}")
             return None
         except Exception as e:
             logger.error(f"[RAG] Context generation error: {e}")

@@ -49,8 +49,9 @@ class RAGConfig:
 
         # Contextual retrieval settings (Anthropic's approach)
         contextual_retrieval_enabled: Enable LLM-generated context prepended to chunks
-        contextual_ollama_base_url: Ollama API endpoint for context generation
-        contextual_model: Ollama model name for context generation
+        contextual_backend_type: Backend type ("lmstudio" or "ollama"), uses server default if None
+        contextual_backend_endpoint: Backend endpoint URL, uses server default if None
+        contextual_model: Model name for context generation, uses server default if None
         contextual_max_workers: Number of parallel context generation workers
         contextual_timeout: Timeout per context generation request in seconds
         contextual_prompt: Prompt template for context generation ({document} and {chunk} placeholders)
@@ -103,9 +104,12 @@ class RAGConfig:
 
     # Contextual retrieval settings (Anthropic's approach for ~40-50% fewer retrieval failures)
     # See: https://www.anthropic.com/news/contextual-retrieval
+    # Uses the same backend (LM Studio/Ollama) as the main server by default.
+    # Set contextual_backend_type/endpoint/model to override with different backend.
     contextual_retrieval_enabled: bool = False  # Enable LLM-generated context for chunks
-    contextual_ollama_base_url: str = "http://localhost:11434"  # Ollama API endpoint
-    contextual_model: str = "llama3.2"  # Local Ollama model for context generation
+    contextual_backend_type: str | None = None  # "lmstudio" or "ollama", None = use server default
+    contextual_backend_endpoint: str | None = None  # Backend URL, None = use server default
+    contextual_model: str | None = None  # Model name, None = use server default (BACKEND_MODEL)
     contextual_max_workers: int = 4  # Parallel context generation workers
     contextual_timeout: float = 60.0  # Timeout per context generation request
     contextual_prompt: str = """<document>
