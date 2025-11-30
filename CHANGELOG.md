@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2025-11-30
+
+### Added
+- **Contextual Retrieval** - Anthropic's approach for ~40-50% better retrieval accuracy
+  - LLM-generated context prepended to each chunk before embedding
+  - Background processing mode - index usable immediately while contexts generate
+  - Progress bar with tqdm for context generation
+  - Pause/resume support - yields to user requests during background processing
+  - Graceful shutdown with `stop_background_contextualization()`
+  - Resumable - progress saved every 50 chunks, can interrupt and resume
+  - Uses same backend (LM Studio/Ollama) as main server
+  - Reference: https://www.anthropic.com/news/contextual-retrieval
+
+- **Configurable Embedding Models** - Speed vs quality tradeoff
+  - `sentence-transformers/all-MiniLM-L6-v2`: Fast (22M params), good quality (default)
+  - `BAAI/bge-base-en-v1.5`: Medium (110M params), better quality
+  - `BAAI/bge-large-en-v1.5`: Slow (335M params), best quality
+  - Hot-swap without re-crawling - automatically detects model change and rebuilds embeddings only
+  - New `rebuild_embeddings()` method for explicit embedding rebuild
+
+- **Progress Bars for RAG Operations**
+  - tqdm progress during embedding generation
+  - Progress bar for contextual retrieval with failed count display
+  - Crawling progress with tqdm (sitemap, recursive, fetching)
+
+- **LLMServer RAG Integration**
+  - New optional `rag_index` parameter for automatic pause/resume during requests
+  - Background RAG processing pauses when user request starts, resumes when complete
+  - Ensures user requests get priority access to LLM backend
+
+### Changed
+- DocSearchIndex now accepts optional `server_config` parameter for contextual retrieval backend settings
+- ChunkContextualizer supports both LM Studio (OpenAI API) and Ollama backends
+- FAISS index building now shows progress bar during embedding generation
+
+### Fixed
+- `stop_background_contextualization()` now silently exits if no background thread running
+
 ## [0.8.3] - 2025-11-29
 
 ### Added
