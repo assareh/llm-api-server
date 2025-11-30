@@ -749,18 +749,23 @@ class DocSearchIndex:
     def stop_background_contextualization(self, timeout: float = 5.0):
         """Stop background context generation for graceful shutdown.
 
+        Does nothing if no background thread is running.
+
         Args:
             timeout: Maximum seconds to wait for thread to finish (default: 5.0)
         """
-        self.contextualizer.stop()
         thread = getattr(self, "_background_thread", None)
-        if thread is not None and thread.is_alive():
-            logger.info(f"[RAG] Waiting up to {timeout}s for background thread to finish...")
-            thread.join(timeout=timeout)
-            if thread.is_alive():
-                logger.warning("[RAG] Background thread did not finish in time")
-            else:
-                logger.info("[RAG] Background thread finished")
+        if thread is None or not thread.is_alive():
+            # No background thread running, nothing to stop
+            return
+
+        self.contextualizer.stop()
+        logger.info(f"[RAG] Waiting up to {timeout}s for background thread to finish...")
+        thread.join(timeout=timeout)
+        if thread.is_alive():
+            logger.warning("[RAG] Background thread did not finish in time")
+        else:
+            logger.info("[RAG] Background thread finished")
         print("[RAG] Background contextualization stopped", file=sys.stderr)
 
     def _load_all_page_contents(self) -> dict[str, str]:
