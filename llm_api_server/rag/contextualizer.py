@@ -17,12 +17,14 @@ import hashlib
 import json
 import logging
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import requests
+from tqdm import tqdm
 
 from .config import RAGConfig
 
@@ -58,6 +60,10 @@ class ChunkContextualizer:
 
         # Load existing context cache
         self.context_cache: dict[str, str] = self._load_context_cache()
+
+        # Pause control for background processing - set when user request starts, cleared when done
+        self._pause_event = threading.Event()
+        self._pause_event.set()  # Start unpaused (set = running, clear = paused)
 
     def _resolve_backend_settings(self):
         """Resolve backend type, endpoint, and model from config hierarchy."""
@@ -201,8 +207,6 @@ class ChunkContextualizer:
             page_contents: Dict mapping URL -> full page text content
             save_every: Save cache every N completed chunks (default: 50)
         """
-        total = len(chunks_to_process)
-        completed = 0
         failed = 0
         last_save = 0
 
@@ -224,44 +228,45 @@ class ChunkContextualizer:
                 )
                 future_to_chunk[future] = (chunk, cache_key)
 
-            # Process completed tasks
-            for future in as_completed(future_to_chunk):
-                chunk, cache_key = future_to_chunk[future]
-                completed += 1
+            # Process completed tasks with progress bar
+            with tqdm(
+                total=len(future_to_chunk),
+                desc="Generating contexts",
+                unit="chunks",
+                file=sys.stderr,
+            ) as pbar:
+                for future in as_completed(future_to_chunk):
+                    chunk, cache_key = future_to_chunk[future]
 
-                try:
-                    context = future.result()
-                    if context:
-                        self.context_cache[cache_key] = context
-                    else:
+                    try:
+                        context = future.result()
+                        if context:
+                            self.context_cache[cache_key] = context
+                        else:
+                            failed += 1
+                    except Exception as e:
+                        logger.error(f"[RAG] Context generation failed for chunk {chunk.get('chunk_id')}: {e}")
                         failed += 1
-                except Exception as e:
-                    logger.error(f"[RAG] Context generation failed for chunk {chunk.get('chunk_id')}: {e}")
-                    failed += 1
 
-                # Save cache periodically to allow resumption
-                if completed - last_save >= save_every:
-                    self._save_context_cache()
-                    last_save = completed
-                    logger.debug(f"[RAG] Saved context cache checkpoint ({completed} chunks)")
+                    pbar.update(1)
+                    if failed > 0:
+                        pbar.set_postfix(failed=failed)
 
-                # Progress update every 100 chunks or at milestones
-                if completed % 100 == 0 or completed == total or completed in [1, 10, 50]:
-                    progress_msg = (
-                        f"[RAG] Context generation: {completed}/{total} ({100*completed/total:.1f}%) "
-                        f"- {failed} failed"
-                    )
-                    print(progress_msg, file=sys.stderr)
-                    logger.info(progress_msg)
+                    # Save cache periodically to allow resumption
+                    if pbar.n - last_save >= save_every:
+                        self._save_context_cache()
+                        last_save = pbar.n
+                        logger.debug(f"[RAG] Saved context cache checkpoint ({pbar.n} chunks)")
 
         # Final save
-        if completed > last_save:
+        if len(future_to_chunk) > last_save:
             self._save_context_cache()
 
     def _generate_single_context(self, chunk_content: str, document_content: str) -> str | None:
         """Generate context for a single chunk using the configured backend.
 
         Supports both LM Studio (OpenAI-compatible) and Ollama backends.
+        Respects pause/resume for yielding to user requests.
 
         Args:
             chunk_content: The chunk text to contextualize
@@ -270,6 +275,11 @@ class ChunkContextualizer:
         Returns:
             Generated context string, or None if failed
         """
+        # Wait if paused (yields to user requests)
+        # Uses timeout to periodically check - blocks until resumed
+        while not self._pause_event.wait(timeout=0.5):
+            pass  # Keep waiting while paused
+
         # Build prompt from template
         prompt = self.config.contextual_prompt.format(
             document=document_content,
@@ -360,3 +370,17 @@ class ChunkContextualizer:
         if self.context_cache_file.exists():
             self.context_cache_file.unlink()
         logger.info("[RAG] Context cache cleared")
+
+    def pause(self):
+        """Pause background context generation (call when user request starts)."""
+        self._pause_event.clear()
+        logger.debug("[RAG] Contextual retrieval paused for user request")
+
+    def resume(self):
+        """Resume background context generation (call when user request completes)."""
+        self._pause_event.set()
+        logger.debug("[RAG] Contextual retrieval resumed")
+
+    def is_paused(self) -> bool:
+        """Check if context generation is currently paused."""
+        return not self._pause_event.is_set()

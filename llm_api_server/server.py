@@ -1,5 +1,6 @@
 """Core LLM API Server implementation."""
 
+import contextlib
 import json
 import logging
 import re
@@ -32,6 +33,7 @@ class LLMServer:
         default_system_prompt: str = "You are a helpful AI assistant.",
         init_hook: Callable[[], None] | None = None,
         logger_names: list[str] | None = None,
+        rag_index: Any | None = None,
     ):
         """Initialize LLM API Server.
 
@@ -43,6 +45,7 @@ class LLMServer:
             default_system_prompt: Default system prompt if file doesn't exist
             init_hook: Optional function to call during initialization (e.g., index building)
             logger_names: Optional list of logger names for debug logging
+            rag_index: Optional DocSearchIndex for pausing background processing during requests
         """
         self.name = name
         self.model_name = model_name
@@ -50,6 +53,7 @@ class LLMServer:
         self.config = config
         self.default_system_prompt = default_system_prompt
         self.init_hook = init_hook
+        self.rag_index = rag_index
 
         # System prompt caching with thread safety
         self._system_prompt_cache: str | None = None
@@ -1142,6 +1146,12 @@ class LLMServer:
     def chat_completions(self):
         """Handle chat completion requests."""
         start_time = time.time()
+
+        # Pause background RAG processing during user request
+        if self.rag_index is not None:
+            with contextlib.suppress(Exception):
+                self.rag_index.pause_background_processing()
+
         try:
             data = request.get_json(silent=True)
 
@@ -1226,6 +1236,12 @@ class LLMServer:
                 )
 
             return jsonify(error_details), 500
+
+        finally:
+            # Resume background RAG processing after request completes
+            if self.rag_index is not None:
+                with contextlib.suppress(Exception):
+                    self.rag_index.resume_background_processing()
 
     def run(
         self,

@@ -567,8 +567,11 @@ class DocSearchIndex:
         if self.config.contextual_retrieval_enabled and self.config.contextual_retrieval_background:
             metadata = self._load_metadata()
             if not metadata.get("contextual_retrieval"):
+                print("[RAG] Contextual retrieval will run in background...", file=sys.stderr)
                 logger.info("[RAG] Starting background contextual retrieval...")
                 self.start_background_contextualization()
+            else:
+                logger.debug("[RAG] Contextual retrieval already completed (skipping background task)")
 
     def rebuild_embeddings(self):
         """Rebuild FAISS index from saved chunks without re-crawling.
@@ -762,6 +765,17 @@ class DocSearchIndex:
                 logger.debug(f"[RAG] Failed to load cached page {cache_file}: {e}")
 
         return page_contents
+
+    def pause_background_processing(self):
+        """Pause background contextual retrieval (call when user request starts).
+
+        Use this to yield LLM resources to user requests during background processing.
+        """
+        self.contextualizer.pause()
+
+    def resume_background_processing(self):
+        """Resume background contextual retrieval (call when user request completes)."""
+        self.contextualizer.resume()
 
     def search(self, query: str, top_k: int | None = None, return_parent: bool = True) -> list[dict[str, Any]]:
         """Search the document index with hybrid retrieval and re-ranking.
