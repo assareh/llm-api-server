@@ -326,8 +326,11 @@ The framework includes a comprehensive RAG system in `llm_api_server/rag/`:
 - **Parent-child chunks** - Hierarchical relationships for context
 - **Hybrid search** - BM25 + semantic via Reciprocal Rank Fusion (RRF)
 - **Cross-encoder re-ranking** - MS MARCO model for accurate final ordering
+- **Contextual retrieval** - Optional LLM-generated context for ~40-50% better retrieval (Anthropic's approach)
+- **Configurable embedding models** - Fast (MiniLM) to accurate (BGE-large), hot-swappable without re-crawling
 - **Incremental updates** - Check timestamps, only rebuild if stale
-- **Local-first** - FAISS vector store, HuggingFace embeddings (all-MiniLM-L6-v2)
+- **Progress bars** - tqdm progress for crawling, fetching, chunking, and embedding
+- **Local-first** - FAISS vector store, HuggingFace embeddings
 
 **Architecture:**
 1. **Crawler** discovers URLs (sitemap XML parsing, recursive link following, or manual list)
@@ -376,6 +379,45 @@ Set `show_progress=False` to disable progress bars (e.g., for non-interactive en
 - Pages without `lastmod`: invalidated after `page_cache_ttl_hours` (default: 7 days)
 - `force_refresh=True`: bypasses all caching, refetches everything
 
+**Embedding Models:**
+Configurable embedding model with speed vs quality tradeoff:
+- `sentence-transformers/all-MiniLM-L6-v2`: Fast (22M params), good quality (default)
+- `BAAI/bge-base-en-v1.5`: Medium (110M params), better quality
+- `BAAI/bge-large-en-v1.5`: Slow (335M params), best quality
+
+Changing embedding model automatically rebuilds embeddings without re-crawling:
+```python
+config = RAGConfig(embedding_model="BAAI/bge-large-en-v1.5", ...)
+index.crawl_and_index()  # Detects change, skips crawl, rebuilds embeddings only
+```
+
+**Contextual Retrieval:**
+Optional LLM-generated context for each chunk (Anthropic's approach for ~40-50% fewer retrieval failures).
+Uses the same backend (LM Studio/Ollama) configured for the main server.
+
+```python
+from llm_api_server import ServerConfig
+from llm_api_server.rag import DocSearchIndex, RAGConfig
+
+server_config = ServerConfig.from_env()
+rag_config = RAGConfig(
+    base_url="https://docs.example.com",
+    contextual_retrieval_enabled=True,      # Enable context generation
+    contextual_retrieval_background=True,   # Run in background (index usable immediately)
+)
+index = DocSearchIndex(rag_config, server_config)
+index.crawl_and_index()  # Builds index
+index.load_index()       # Auto-starts background contextualization if enabled
+```
+
+Or run contextual retrieval explicitly (can be interrupted and resumed):
+```python
+index.crawl_and_index()  # Build index first
+index.add_contextual_retrieval()  # Run separately, saves progress every 50 chunks
+```
+
+Reference: https://www.anthropic.com/news/contextual-retrieval
+
 **Ported from Ivan:**
 This module was generalized from Ivan's HashiCorp doc search implementation:
 - Removed HashiCorp-specific logic (product extraction, domain-specific synonyms)
@@ -410,5 +452,5 @@ When making changes, test in both projects.
 
 ---
 
-*Last updated: 2025-11-29*
-*Version: 0.8.3*
+*Last updated: 2025-11-30*
+*Version: 0.9.0*

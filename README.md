@@ -248,8 +248,14 @@ The RAG module uses a four-component architecture:
 
 **Local-First Design:**
 - **FAISS** for vector storage (no cloud dependencies)
-- **HuggingFace embeddings** (all-MiniLM-L6-v2, ~80MB)
+- **HuggingFace embeddings** - configurable from fast (MiniLM) to accurate (BGE-large)
 - **Everything runs locally** - no API keys required for core functionality
+
+**Contextual Retrieval (Optional):**
+- **LLM-generated context** - Anthropic's approach for ~40-50% better retrieval
+- **Background processing** - index usable immediately while contexts generate
+- **Resumable** - progress saved every 50 chunks, can interrupt and resume
+- **Uses server backend** - same LM Studio/Ollama configured for requests
 
 ### Quick Start
 
@@ -323,9 +329,17 @@ config = RAGConfig(
     embedding_model="sentence-transformers/all-MiniLM-L6-v2",
     rerank_model="cross-encoder/ms-marco-MiniLM-L-12-v2",  # Cross-encoder for re-ranking
 
+    # Contextual retrieval settings (optional, requires server_config)
+    contextual_retrieval_enabled=False,    # Enable LLM-generated context for chunks
+    contextual_retrieval_background=False, # Run in background thread (index usable immediately)
+    contextual_max_workers=4,              # Parallel context generation workers
+
     # Index settings
     update_check_interval_hours=168,       # Check for updates (7 days)
     page_cache_ttl_hours=168,              # TTL for cached pages without lastmod (7 days, 0 = never)
+
+    # Progress display
+    show_progress=True,                    # Show tqdm progress bars
 )
 ```
 
@@ -382,6 +396,58 @@ config = RAGConfig(
     hybrid_bm25_weight=0.2,      # Lower influence from BM25 ranks
     hybrid_semantic_weight=0.8,  # Higher influence from semantic ranks
 )
+```
+
+### Advanced: Contextual Retrieval
+
+Contextual retrieval prepends LLM-generated context to each chunk before embedding, improving retrieval accuracy by ~40-50% (Anthropic's approach).
+
+```python
+from llm_api_server import ServerConfig
+from llm_api_server.rag import DocSearchIndex, RAGConfig
+
+# Get server config for backend settings
+server_config = ServerConfig.from_env()
+
+# Enable contextual retrieval
+rag_config = RAGConfig(
+    base_url="https://docs.example.com",
+    contextual_retrieval_enabled=True,      # Enable context generation
+    contextual_retrieval_background=True,   # Run in background (recommended)
+)
+
+# Pass server_config to use same backend for context generation
+index = DocSearchIndex(rag_config, server_config)
+index.crawl_and_index()
+index.load_index()  # Starts background contextualization if enabled
+```
+
+Or run contextual retrieval explicitly (can be interrupted and resumed):
+
+```python
+index.crawl_and_index()              # Build index first (fast)
+index.add_contextual_retrieval()     # Run separately, saves progress every 50 chunks
+```
+
+Reference: https://www.anthropic.com/news/contextual-retrieval
+
+### Advanced: Embedding Models
+
+Change embedding model without re-crawling:
+
+```python
+config = RAGConfig(
+    base_url="https://docs.example.com",
+    embedding_model="BAAI/bge-large-en-v1.5",  # Upgrade to better model
+)
+index = DocSearchIndex(config)
+index.crawl_and_index()  # Detects model change, rebuilds embeddings only
+```
+
+Or explicitly rebuild embeddings:
+
+```python
+index.rebuild_embeddings()  # Uses saved chunks, skips crawling
 ```
 
 ## Configuration
