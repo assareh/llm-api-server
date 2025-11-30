@@ -27,6 +27,7 @@ from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from readability import Document as ReadabilityDocument
 from sentence_transformers import CrossEncoder
+from tqdm import tqdm
 
 from .chunker import semantic_chunk_html
 from .config import RAGConfig
@@ -168,6 +169,7 @@ class DocSearchIndex:
         - Expanding max_pages limit without full rebuild
         - Stateful crawling with progress tracking
         - Staleness refresh for existing URLs (TTL-based or forced)
+        - Automatic embedding-only rebuild when model changes (skips crawling)
 
         Args:
             force_rebuild: Force full rebuild of index and crawl state (clears all state)
@@ -176,6 +178,26 @@ class DocSearchIndex:
         if not force_rebuild and not force_refresh and not self.needs_update():
             logger.info("[RAG] Index is up-to-date, loading from cache")
             self.load_index()
+            return
+
+        # Check if only the embedding model changed (can skip crawling)
+        metadata = self._load_metadata()
+        saved_model = metadata.get("embedding_model")
+        chunks_file = self.cache_dir / "chunks.json"
+        embedding_model_changed = (
+            saved_model
+            and saved_model != self.config.embedding_model
+            and chunks_file.exists()
+            and not force_rebuild
+            and not force_refresh
+        )
+
+        if embedding_model_changed:
+            logger.info(
+                f"[RAG] Embedding model changed ({saved_model} -> {self.config.embedding_model}), "
+                "rebuilding embeddings from saved chunks (skipping crawl)..."
+            )
+            self.rebuild_embeddings()
             return
 
         logger.info("[RAG] " + "=" * 70)
@@ -499,9 +521,8 @@ class DocSearchIndex:
         if not faiss_loaded:
             # Fall back to rebuilding FAISS from chunks (slow path)
             logger.info(f"[RAG] Building FAISS vector index from {len(self.chunks)} chunks...")
-            logger.info("[RAG] Generating embeddings for all chunks (this is the slowest step)...")
             start = time.time()
-            self.vectorstore = FAISS.from_documents(self.chunks, self.embeddings)
+            self.vectorstore = self._build_faiss_with_progress(self.chunks)
             logger.info(f"[RAG] ✓ FAISS index built in {time.time() - start:.1f}s")
 
             # Save the rebuilt index for next time
@@ -536,6 +557,57 @@ class DocSearchIndex:
         logger.info("[RAG] ✓ Ensemble retriever ready")
 
         logger.info("[RAG] ✓ Index loaded successfully")
+
+    def rebuild_embeddings(self):
+        """Rebuild FAISS index from saved chunks without re-crawling.
+
+        Use this when changing embedding models - it skips the expensive crawling
+        and chunking phases and just regenerates embeddings from saved chunks.
+
+        Raises:
+            ValueError: If no saved chunks found (need to crawl first)
+        """
+        logger.info("[RAG] " + "=" * 70)
+        logger.info("[RAG] Rebuilding embeddings from saved chunks")
+        logger.info("[RAG] " + "=" * 70)
+
+        # Load saved chunks
+        chunks_file = self.cache_dir / "chunks.json"
+
+        if not chunks_file.exists():
+            raise ValueError("No saved chunks found. Run crawl_and_index() first.")
+
+        logger.info("[RAG] Loading saved chunks...")
+        self.chunks = self._load_chunks()
+        self.parent_chunks = self._load_parent_chunks()
+        logger.info(f"[RAG] Loaded {len(self.chunks)} chunks, {len(self.parent_chunks)} parent chunks")
+
+        if not self.chunks:
+            raise ValueError("Chunks file exists but is empty. Run crawl_and_index() first.")
+
+        # Initialize ML models
+        logger.info("[RAG] Initializing embedding model...")
+        self._initialize_components()
+
+        # Rebuild FAISS index
+        logger.info(f"[RAG] Rebuilding FAISS index with model: {self.config.embedding_model}")
+        start_time = time.time()
+        self._build_retrievers()
+        logger.info(f"[RAG] ✓ Index rebuilt in {time.time() - start_time:.1f}s")
+
+        # Update metadata with new embedding model
+        self._save_metadata(
+            {
+                "version": self.INDEX_VERSION,
+                "last_update": datetime.now().isoformat(),
+                "num_chunks": len(self.chunks),
+                "embedding_model": self.config.embedding_model,
+            }
+        )
+
+        logger.info("[RAG] " + "=" * 70)
+        logger.info("[RAG] Embedding rebuild complete!")
+        logger.info("[RAG] " + "=" * 70)
 
     def search(self, query: str, top_k: int | None = None, return_parent: bool = True) -> list[dict[str, Any]]:
         """Search the document index with hybrid retrieval and re-ranking.
@@ -1042,6 +1114,37 @@ class DocSearchIndex:
             self.cross_encoder = CrossEncoder(self.config.rerank_model)
             logger.info(f"[RAG] ✓ Cross-encoder loaded in {time.time() - start:.1f}s")
 
+    def _build_faiss_with_progress(self, chunks: list[Document], batch_size: int = 100) -> FAISS:
+        """Build FAISS index with progress bar for embedding generation.
+
+        Args:
+            chunks: List of Document objects to embed
+            batch_size: Number of chunks to embed at once
+
+        Returns:
+            FAISS vectorstore
+        """
+        if not chunks:
+            raise ValueError("No chunks to embed")
+
+        total_chunks = len(chunks)
+        logger.info(f"[RAG] Generating embeddings for {total_chunks} chunks...")
+
+        # Process first batch to initialize FAISS
+        first_batch = chunks[:batch_size]
+        vectorstore = FAISS.from_documents(first_batch, self.embeddings)
+
+        # Process remaining batches with progress bar
+        if total_chunks > batch_size:
+            remaining_chunks = chunks[batch_size:]
+            with tqdm(total=total_chunks, initial=batch_size, desc="Embedding chunks", unit="chunks") as pbar:
+                for i in range(0, len(remaining_chunks), batch_size):
+                    batch = remaining_chunks[i : i + batch_size]
+                    vectorstore.add_documents(batch)
+                    pbar.update(len(batch))
+
+        return vectorstore
+
     def _compute_faiss_checksum(self, faiss_path: str) -> str:
         """Compute SHA256 checksum of FAISS index files.
 
@@ -1109,9 +1212,8 @@ class DocSearchIndex:
         """Build FAISS vector store and hybrid retriever."""
         # Build FAISS index
         logger.info(f"[RAG] Building FAISS vector index from {len(self.chunks)} chunks...")
-        logger.info("[RAG] Generating embeddings for all chunks (this is the slowest step)...")
         start = time.time()
-        self.vectorstore = FAISS.from_documents(self.chunks, self.embeddings)
+        self.vectorstore = self._build_faiss_with_progress(self.chunks)
         logger.info(f"[RAG] ✓ FAISS index built in {time.time() - start:.1f}s")
 
         # Save FAISS index with checksum

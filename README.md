@@ -314,8 +314,13 @@ config = RAGConfig(
     rerank_enabled=True,                   # Enable cross-encoder re-ranking
     rerank_top_k=80,                       # Candidates for re-ranking
 
-    # Model settings
-    embedding_model="all-MiniLM-L6-v2",               # HuggingFace model (~80MB)
+    # Model settings (embedding model: speed vs quality tradeoff)
+    # Options:
+    #   - "sentence-transformers/all-MiniLM-L6-v2": Fast (22M params), good quality (default)
+    #   - "BAAI/bge-base-en-v1.5": Medium (110M params), better quality
+    #   - "BAAI/bge-large-en-v1.5": Slow (335M params), best quality
+    # Note: Changing embedding model requires full index rebuild
+    embedding_model="sentence-transformers/all-MiniLM-L6-v2",
     rerank_model="cross-encoder/ms-marco-MiniLM-L-12-v2",  # Cross-encoder for re-ranking
 
     # Index settings

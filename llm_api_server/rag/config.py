@@ -40,7 +40,11 @@ class RAGConfig:
         parent_context_max_chars: Max characters for parent context in tool results (default: 500, 0=no limit)
 
         # Model settings
-        embedding_model: HuggingFace embedding model name
+        embedding_model: HuggingFace embedding model name. Options (speed vs quality):
+            - "sentence-transformers/all-MiniLM-L6-v2": Fast (22M params), good quality (default)
+            - "BAAI/bge-base-en-v1.5": Medium (110M params), better quality
+            - "BAAI/bge-large-en-v1.5": Slow (335M params), best quality
+            Note: Changing embedding model requires full index rebuild.
         rerank_model: Cross-encoder model for re-ranking
 
         # Contextual retrieval settings (Anthropic's approach)
@@ -90,7 +94,11 @@ class RAGConfig:
     parent_context_max_chars: int = 500  # Max chars for parent context in tool results (0 = no limit)
 
     # Model settings
-    embedding_model: str = "BAAI/bge-large-en-v1.5"  # Strong open-source model on MTEB leaderboard
+    # Embedding model options (speed vs quality tradeoff):
+    #   - "sentence-transformers/all-MiniLM-L6-v2": Fast (22M params), good quality
+    #   - "BAAI/bge-base-en-v1.5": Medium (110M params), better quality
+    #   - "BAAI/bge-large-en-v1.5": Slow (335M params), best quality
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"  # Fast default, configurable
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-12-v2"
 
     # Contextual retrieval settings (Anthropic's approach for ~40-50% fewer retrieval failures)
