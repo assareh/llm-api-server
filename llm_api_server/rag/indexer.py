@@ -563,6 +563,13 @@ class DocSearchIndex:
 
         logger.info("[RAG] ✓ Index loaded successfully")
 
+        # Start background contextualization if enabled
+        if self.config.contextual_retrieval_enabled and self.config.contextual_retrieval_background:
+            metadata = self._load_metadata()
+            if not metadata.get("contextual_retrieval"):
+                logger.info("[RAG] Starting background contextual retrieval...")
+                self.start_background_contextualization()
+
     def rebuild_embeddings(self):
         """Rebuild FAISS index from saved chunks without re-crawling.
 

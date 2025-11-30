@@ -49,6 +49,7 @@ class RAGConfig:
 
         # Contextual retrieval settings (Anthropic's approach)
         contextual_retrieval_enabled: Enable LLM-generated context prepended to chunks
+        contextual_retrieval_background: Run contextual retrieval in background thread (index usable immediately)
         contextual_backend_type: Backend type ("lmstudio" or "ollama"), uses server default if None
         contextual_backend_endpoint: Backend endpoint URL, uses server default if None
         contextual_model: Model name for context generation, uses server default if None
@@ -111,6 +112,7 @@ class RAGConfig:
     # Uses the same backend (LM Studio/Ollama) as the main server by default.
     # Set contextual_backend_type/endpoint/model to override with different backend.
     contextual_retrieval_enabled: bool = False  # Enable LLM-generated context for chunks
+    contextual_retrieval_background: bool = False  # Run contextual retrieval in background thread
     contextual_backend_type: str | None = None  # "lmstudio" or "ollama", None = use server default
     contextual_backend_endpoint: str | None = None  # Backend URL, None = use server default
     contextual_model: str | None = None  # Model name, None = use server default (BACKEND_MODEL)
