@@ -12,12 +12,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def ollama_web_search(query: str, max_results: int = 10, api_key: str = "") -> list[dict[str, str]]:
+def ollama_web_search(query: str, max_results: int = 5, api_key: str = "") -> list[dict[str, str]]:
     """Search the web using Ollama's search API.
 
     Args:
         query: The search query
-        max_results: Maximum number of results (not enforced by API, but used for consistency)
+        max_results: Maximum number of results (default 5)
         api_key: Ollama API key for authentication
 
     Returns:
@@ -69,12 +69,12 @@ def ollama_web_search(query: str, max_results: int = 10, api_key: str = "") -> l
         raise
 
 
-def web_search(query: str, max_results: int = 10, site: str = "", ollama_api_key: str = "") -> str:
+def web_search(query: str, max_results: int = 5, site: str = "", ollama_api_key: str = "") -> str:
     """Search the web using Ollama API.
 
     Args:
         query: The search query
-        max_results: Maximum number of results (default 10)
+        max_results: Maximum number of results (default 5)
         site: Optional site restriction (e.g., 'hashicorp.com')
         ollama_api_key: Ollama API key (required)
 

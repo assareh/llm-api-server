@@ -190,7 +190,7 @@ server = LLMServer(
 - **`create_web_search_tool(config)`** - Web search using Ollama API
   - Requires optional `websearch` dependency: `uv sync --extra websearch`
   - Requires `OLLAMA_API_KEY` to be configured
-  - Parameters: `query`, `max_results` (default 10), `site` (optional filter)
+  - Parameters: `query`, `max_results` (default 5), `site` (optional filter)
 - **`create_doc_search_tool(index, name, description)`** - Search local RAG index
   - Requires optional `rag` dependency: `uv sync --extra rag`
   - Parameters: `query`, `top_k` (default 5)
@@ -225,7 +225,7 @@ You have access to the following tools:
 
   Parameters:
   - query: Search terms
-  - max_results: Number of results (default 10)
+  - max_results: Number of results (default 5)
   - site: Optional domain filter (e.g., "stackoverflow.com")
 ```
 

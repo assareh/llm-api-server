@@ -118,7 +118,7 @@ class WebSearchInput(BaseModel):
     query: str = Field(
         description="The search query (e.g., 'Python async programming best practices', 'Docker container networking')"
     )
-    max_results: int = Field(default=10, description="Maximum number of results to return. Default is 10.")
+    max_results: int = Field(default=5, description="Maximum number of results to return. Default is 5.")
     site: str = Field(default="", description="Optional site restriction (e.g., 'hashicorp.com')")
 
 
@@ -153,7 +153,7 @@ def create_web_search_tool(config: "ServerConfig") -> Tool:
     """
     from .web_search_tool import web_search
 
-    def _web_search_wrapper(query: str, max_results: int = 10, site: str = "") -> str:
+    def _web_search_wrapper(query: str, max_results: int = 5, site: str = "") -> str:
         """Wrapper that provides API key from config."""
         return web_search(query, max_results, site, ollama_api_key=config.OLLAMA_API_KEY)
 
