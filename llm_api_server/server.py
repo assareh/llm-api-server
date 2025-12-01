@@ -437,6 +437,35 @@ class LLMServer:
 
         return message, tool_calls
 
+    def _contains_malformed_tool_tokens(self, content: str) -> bool:
+        """Check if response content contains malformed tool call tokens.
+
+        Some models output raw internal function calling tokens like:
+        <|start|>assistant<|channel|>commentary to=functions.web_search <|constrain|>json<|message|>{...}
+
+        These should have been parsed as tool calls but weren't.
+
+        Args:
+            content: Response content to check
+
+        Returns:
+            True if malformed tokens are detected
+        """
+        if not content:
+            return False
+
+        # Pattern for Hermes/ChatML-style malformed tool call tokens
+        patterns = [
+            # Hermes-style: <|start|>assistant<|channel|>...
+            r"<\|start\|>assistant<\|channel\|>",
+            # Generic special token patterns that indicate malformed output
+            r"<\|start\|>.*?<\|message\|>",
+            # Functions marker
+            r"to=functions\.\w+",
+        ]
+
+        return any(re.search(pattern, content, re.DOTALL) for pattern in patterns)
+
     def _parse_thinker_response(self, content: str) -> tuple[str, list]:
         """Parse response from thinker models that include reasoning.
 
@@ -750,6 +779,9 @@ class LLMServer:
         one more time WITHOUT tools. This forces the LLM to produce a text response
         synthesizing the information gathered rather than attempting more tool calls.
 
+        If the model outputs malformed tool tokens instead of a proper response,
+        we retry once with a stern message instructing it to just answer.
+
         Args:
             messages: Full message history including tool results
             temperature: Sampling temperature
@@ -771,73 +803,119 @@ class LLMServer:
                 messages=messages,
             )
 
-        # Call backend WITHOUT tools and with tool_choice="none" to force a text response
-        try:
-            if self.config.BACKEND_TYPE == "ollama":
-                from .backends import call_ollama
+        # Try up to 2 times - first normally, then with stern instruction if malformed
+        max_attempts = 2
+        current_messages = messages.copy()
 
-                response = call_ollama(
-                    messages,
-                    [],  # Empty tools list
-                    self.config,
-                    temperature,
-                    stream=False,
-                    tool_choice="none",  # Explicitly disable tool calls
-                )
-            else:  # lmstudio
-                from .backends import call_lmstudio
+        for attempt in range(max_attempts):
+            try:
+                if self.config.BACKEND_TYPE == "ollama":
+                    from .backends import call_ollama
 
-                response = call_lmstudio(
-                    messages,
-                    [],  # Empty tools list
-                    self.config,
-                    temperature,
-                    stream=False,
-                    tool_choice="none",  # Explicitly disable tool calls
+                    response = call_ollama(
+                        current_messages,
+                        [],  # Empty tools list
+                        self.config,
+                        temperature,
+                        stream=False,
+                        tool_choice="none",  # Explicitly disable tool calls
+                    )
+                else:  # lmstudio
+                    from .backends import call_lmstudio
+
+                    response = call_lmstudio(
+                        current_messages,
+                        [],  # Empty tools list
+                        self.config,
+                        temperature,
+                        stream=False,
+                        tool_choice="none",  # Explicitly disable tool calls
+                    )
+                response_data = response.json()
+            except (requests.Timeout, requests.ConnectionError) as e:
+                self._log_event(
+                    "error",
+                    "tool_loop_final_response_error",
+                    f"[TOOL LOOP] Failed to generate final response: {e}",
+                    error=str(e),
+                    error_type=type(e).__name__,
                 )
-            response_data = response.json()
-        except (requests.Timeout, requests.ConnectionError) as e:
-            # If we can't get a final response, return a fallback message
-            self._log_event(
-                "error",
-                "tool_loop_final_response_error",
-                f"[TOOL LOOP] Failed to generate final response: {e}",
-                error=str(e),
-                error_type=type(e).__name__,
-            )
-            return {
-                "id": f"chatcmpl-{int(time.time())}",
-                "object": "chat.completion",
-                "created": int(time.time()),
-                "model": self.model_name,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": "I gathered some information using tools but wasn't able to formulate a complete response. Please try again.",
-                        },
-                        "finish_reason": "error",
+                return self._make_error_response(
+                    "I gathered some information but encountered an error generating a response. Please try again.",
+                    tools_used,
+                )
+
+            # Extract message
+            message, _ = self._extract_message_and_tool_calls(response_data)
+            content = message.get("content", "")
+
+            # Check for malformed tool tokens or empty response
+            has_malformed = self._contains_malformed_tool_tokens(content)
+            is_empty = not content or not content.strip()
+
+            if has_malformed or is_empty:
+                if attempt == 0:
+                    # First attempt failed - retry with stern instruction
+                    self._log_event(
+                        "warning",
+                        "malformed_response_retry",
+                        "[TOOL LOOP] Response contains malformed tokens or is empty, retrying with stern instruction",
+                        has_malformed=has_malformed,
+                        is_empty=is_empty,
+                        raw_content=content[:200] if content else "(empty)",
+                    )
+                    # Add stern instruction to force a proper response
+                    stern_message = {
+                        "role": "user",
+                        "content": (
+                            "IMPORTANT: Do not attempt to use any tools. Tools are not available. "
+                            "Based on the information you have gathered, provide your best answer now. "
+                            "Just give a direct response to the original question."
+                        ),
                     }
-                ],
-                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-                "tools_used": tools_used,
-            }
+                    current_messages = messages.copy()
+                    current_messages.append(stern_message)
+                    continue
+                else:
+                    # Second attempt also failed - give up and return fallback
+                    self._log_event(
+                        "error",
+                        "malformed_response_fallback",
+                        "[TOOL LOOP] Response still malformed after retry, returning fallback",
+                        has_malformed=has_malformed,
+                        is_empty=is_empty,
+                        tools_used=tools_used,
+                    )
+                    return self._make_error_response(
+                        "I'm sorry, I encountered an issue processing your request. Please try again.",
+                        tools_used,
+                    )
+            else:
+                # Valid response - return it
+                return {
+                    "id": f"chatcmpl-{int(time.time())}",
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": self.model_name,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": content},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    "tools_used": tools_used,
+                }
 
-        # Extract message (no tool calls expected since we didn't provide tools)
-        message, _ = self._extract_message_and_tool_calls(response_data)
-        content = message.get("content", "")
+        # Should not reach here, but just in case
+        return self._make_error_response(
+            "I'm sorry, I encountered an issue processing your request. Please try again.",
+            tools_used,
+        )
 
-        # Log warning if final response is empty after tool calls
-        if not content and tools_used:
-            self._log_event(
-                "warning",
-                "empty_final_response",
-                f"Empty final response from model after timeout/max iterations. Tools used: {tools_used}",
-                tools_used=tools_used,
-                raw_response=response_data,
-            )
-
+    def _make_error_response(self, message: str, tools_used: list[str]) -> dict:
+        """Create a standardized error response."""
         return {
             "id": f"chatcmpl-{int(time.time())}",
             "object": "chat.completion",
@@ -846,8 +924,8 @@ class LLMServer:
             "choices": [
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": content},
-                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": message},
+                    "finish_reason": "error",
                 }
             ],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
