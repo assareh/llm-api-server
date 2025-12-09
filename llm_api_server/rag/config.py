@@ -63,6 +63,17 @@ class RAGConfig:
             Pages with lastmod from sitemap are invalidated when lastmod changes.
             Pages without lastmod are invalidated after this TTL expires.
 
+        # Periodic update settings (for long-running applications)
+        periodic_update_enabled: Enable background sitemap polling for automatic updates (default: False)
+        periodic_update_interval_hours: Hours between sitemap checks (default: 6.0)
+        periodic_update_min_interval_minutes: Minimum minutes between checks to prevent rapid polling (default: 30.0)
+        update_batch_size: Maximum pages to process per update cycle (default: 50)
+        update_on_startup: Run initial crawl_and_index on load_index if index missing (default: True)
+
+        # Tombstone settings (for incremental updates without full rebuild)
+        tombstone_rebuild_threshold: Fraction of tombstoned chunks that triggers full rebuild (default: 0.1 = 10%)
+        auto_rebuild_enabled: Automatically rebuild index when tombstone threshold exceeded (default: True)
+
         # Progress display settings
         show_progress: Show progress bars during crawling/indexing (default: True).
             Disable for non-interactive environments or quiet operation.
@@ -132,6 +143,17 @@ Please give a short succinct context (2-3 sentences) to situate this chunk withi
     # Index settings
     update_check_interval_hours: int = 168  # 7 days
     page_cache_ttl_hours: int = 168  # 7 days - TTL for cached pages without lastmod (0 = never expire)
+
+    # Periodic update settings (for long-running applications)
+    periodic_update_enabled: bool = False  # Disabled by default - opt-in feature
+    periodic_update_interval_hours: float = 6.0  # Check sitemap every 6 hours
+    periodic_update_min_interval_minutes: float = 30.0  # Minimum 30 minutes between checks
+    update_batch_size: int = 50  # Max pages to process per update cycle
+    update_on_startup: bool = True  # Run initial crawl if index missing
+
+    # Tombstone settings (for incremental updates without full rebuild)
+    tombstone_rebuild_threshold: float = 0.1  # Rebuild when 10% are tombstoned
+    auto_rebuild_enabled: bool = True  # Automatically rebuild when threshold exceeded
 
     # Progress display settings
     show_progress: bool = True  # Show progress bars during crawling/indexing

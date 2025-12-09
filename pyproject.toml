@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-api-server"
-version = "0.9.4"
+version = "0.10.0"
 description = "Reusable Flask server for LLM backends (Ollama, LM Studio) with tool calling"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -57,6 +57,12 @@ Issues = "https://github.com/assareh/llm-api-server/issues"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["llm_api_server*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.md"]
+
+# Use strict editable mode to avoid copying files during development
+[tool.setuptools.cmdclass]
 
 [tool.black]
 line-length = 120

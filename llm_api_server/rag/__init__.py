@@ -31,10 +31,16 @@ Example usage:
 
 from .config import RAGConfig
 from .contextualizer import ChunkContextualizer
+from .crawler import SitemapChanges
 from .indexer import DocSearchIndex
+from .updater import PeriodicIndexUpdater, UpdateResult, UpdaterStatus
 
 __all__ = [
     "ChunkContextualizer",
     "DocSearchIndex",
+    "PeriodicIndexUpdater",
     "RAGConfig",
+    "SitemapChanges",
+    "UpdateResult",
+    "UpdaterStatus",
 ]

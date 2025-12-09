@@ -12,6 +12,8 @@ import re
 import sys
 import time
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -22,6 +24,56 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SitemapChanges:
+    """Result of comparing current sitemap with cached version.
+
+    Attributes:
+        new_urls: URLs present in sitemap but not previously indexed
+        updated_urls: URLs with changed lastmod timestamps (url, new_lastmod, old_lastmod)
+        removed_urls: URLs previously indexed but no longer in sitemap
+        unchanged_urls: URLs with same lastmod (no update needed)
+        sitemap_unchanged: True if sitemap itself hasn't changed (no need to check pages)
+        checked_at: Timestamp when check was performed
+        error: Error message if sitemap check failed, None otherwise
+    """
+
+    new_urls: list[str] = field(default_factory=list)
+    updated_urls: list[tuple[str, str | None, str | None]] = field(
+        default_factory=list
+    )  # (url, new_lastmod, old_lastmod)
+    removed_urls: list[str] = field(default_factory=list)
+    unchanged_urls: list[str] = field(default_factory=list)
+    sitemap_unchanged: bool = False
+    checked_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    error: str | None = None
+
+    @property
+    def has_changes(self) -> bool:
+        """Return True if there are any changes to process."""
+        return bool(self.new_urls or self.updated_urls or self.removed_urls)
+
+    @property
+    def total_changes(self) -> int:
+        """Return total number of URLs that need processing."""
+        return len(self.new_urls) + len(self.updated_urls) + len(self.removed_urls)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "new_urls": self.new_urls,
+            "updated_urls": [(u, n, o) for u, n, o in self.updated_urls],
+            "removed_urls": self.removed_urls,
+            "unchanged_count": len(self.unchanged_urls),
+            "sitemap_unchanged": self.sitemap_unchanged,
+            "checked_at": self.checked_at.isoformat(),
+            "has_changes": self.has_changes,
+            "total_changes": self.total_changes,
+            "error": self.error,
+        }
+
 
 # Default user agent for crawling
 DEFAULT_USER_AGENT = "RAG-DocBot/1.0 (Respectful crawler; +https://github.com/assareh/llm-api-server)"
@@ -100,7 +152,8 @@ class DocumentCrawler:
         for robots_url in robots_urls_to_try:
             try:
                 # Fetch robots.txt to parse both rules and sitemap URLs
-                response = requests.get(robots_url, headers={"User-Agent": user_agent}, timeout=request_timeout)
+                headers = {"User-Agent": user_agent, "Accept-Encoding": "gzip, deflate"}
+                response = requests.get(robots_url, headers=headers, timeout=request_timeout)
                 response.raise_for_status()
 
                 # Parse sitemap URLs from robots.txt
@@ -209,9 +262,8 @@ class DocumentCrawler:
         for idx, sitemap_url in enumerate(sitemap_urls, 1):
             try:
                 logger.info(f"[CRAWLER] [{idx}/{len(sitemap_urls)}] Trying sitemap: {sitemap_url}")
-                response = requests.get(
-                    sitemap_url, headers={"User-Agent": self.user_agent}, timeout=self.request_timeout
-                )
+                headers = {"User-Agent": self.user_agent, "Accept-Encoding": "gzip, deflate"}
+                response = requests.get(sitemap_url, headers=headers, timeout=self.request_timeout)
                 response.raise_for_status()
 
                 # Parse the sitemap
@@ -315,9 +367,8 @@ class DocumentCrawler:
                             # Cache miss - fetch fresh
                             pbar.set_postfix_str(f"{sitemap_name[:20]} (fetching)", refresh=True)
 
-                            response = requests.get(
-                                sitemap_url, headers={"User-Agent": self.user_agent}, timeout=self.request_timeout
-                            )
+                            headers = {"User-Agent": self.user_agent, "Accept-Encoding": "gzip, deflate"}
+                            response = requests.get(sitemap_url, headers=headers, timeout=self.request_timeout)
                             response.raise_for_status()
                             sub_urls = self._parse_sitemap_xml(response.content)
                             urls.extend(sub_urls)
@@ -420,9 +471,8 @@ class DocumentCrawler:
             try:
                 time.sleep(self.rate_limit_delay)
 
-                response = requests.get(
-                    current_url, headers={"User-Agent": self.user_agent}, timeout=self.request_timeout
-                )
+                headers = {"User-Agent": self.user_agent, "Accept-Encoding": "gzip, deflate"}
+                response = requests.get(current_url, headers=headers, timeout=self.request_timeout)
                 response.raise_for_status()
 
                 # Only parse HTML content, skip XML/RSS/etc
@@ -486,7 +536,12 @@ class DocumentCrawler:
                 logger.debug(f"[CRAWLER] Skipping robots.txt check (not loaded) for: {url}")
 
             logger.debug(f"[CRAWLER] Fetching: {url}")
-            response = requests.get(url, headers={"User-Agent": self.user_agent}, timeout=self.request_timeout)
+            # Explicitly set Accept-Encoding to avoid Brotli issues (some servers send br but decompression can fail)
+            headers = {
+                "User-Agent": self.user_agent,
+                "Accept-Encoding": "gzip, deflate",  # Exclude 'br' (Brotli) to avoid decompression errors
+            }
+            response = requests.get(url, headers=headers, timeout=self.request_timeout)
             status_code = response.status_code
 
             # Verify final URL is still within base domain (blocks redirects to external sites)
@@ -585,3 +640,147 @@ class DocumentCrawler:
                 json.dump(cache, f, indent=2)
         except Exception as e:
             logger.warning(f"[CRAWLER] Failed to save sitemap cache: {e}")
+
+    def get_sitemap_changes(self, indexed_urls: dict[str, str | None]) -> SitemapChanges:
+        """Compare current sitemap with previously indexed URLs to detect changes.
+
+        This method is designed for periodic update checking - it fetches the sitemap
+        and compares lastmod timestamps with the previously indexed URLs to determine
+        which pages need to be re-indexed.
+
+        Args:
+            indexed_urls: Dict mapping URL -> lastmod timestamp (or None if no lastmod)
+                         This should come from the index's crawl_state tracking.
+
+        Returns:
+            SitemapChanges with new, updated, removed, and unchanged URLs
+        """
+        result = SitemapChanges()
+
+        try:
+            # Fetch current sitemap URLs
+            logger.info("[CRAWLER] Checking sitemap for changes...")
+            current_urls = self._discover_sitemap()
+
+            if not current_urls:
+                # No sitemap found - try recursive crawl for comparison
+                logger.info("[CRAWLER] No sitemap found, falling back to recursive crawl for change detection")
+                current_urls = self._recursive_crawl()
+
+            if not current_urls:
+                result.error = "No URLs discovered from sitemap or crawl"
+                return result
+
+            # Build lookup of current URLs -> lastmod
+            current_url_map: dict[str, str | None] = {}
+            for url_info in current_urls:
+                url = url_info.get("url")
+                if url:
+                    # Normalize URL for consistent comparison
+                    url = self._normalize_url(url)
+                    current_url_map[url] = url_info.get("lastmod")
+
+            # Compare with indexed URLs
+            indexed_set = set(indexed_urls.keys())
+            current_set = set(current_url_map.keys())
+
+            # New URLs: in current but not in indexed
+            new_urls = current_set - indexed_set
+            result.new_urls = list(new_urls)
+
+            # Removed URLs: in indexed but not in current
+            removed_urls = indexed_set - current_set
+            result.removed_urls = list(removed_urls)
+
+            # Check for updates in URLs that exist in both
+            common_urls = indexed_set & current_set
+            for url in common_urls:
+                old_lastmod = indexed_urls.get(url)
+                new_lastmod = current_url_map.get(url)
+
+                # Determine if update needed based on lastmod comparison
+                if self._lastmod_indicates_change(old_lastmod, new_lastmod):
+                    result.updated_urls.append((url, new_lastmod, old_lastmod))
+                else:
+                    result.unchanged_urls.append(url)
+
+            # Log summary
+            logger.info(
+                f"[CRAWLER] Sitemap changes detected: "
+                f"{len(result.new_urls)} new, "
+                f"{len(result.updated_urls)} updated, "
+                f"{len(result.removed_urls)} removed, "
+                f"{len(result.unchanged_urls)} unchanged"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"[CRAWLER] Failed to check sitemap changes: {e}")
+            result.error = str(e)
+            return result
+
+    def _lastmod_indicates_change(self, old_lastmod: str | None, new_lastmod: str | None) -> bool:
+        """Determine if lastmod timestamps indicate a page has changed.
+
+        Args:
+            old_lastmod: Previously stored lastmod (from index)
+            new_lastmod: Current lastmod (from sitemap)
+
+        Returns:
+            True if the page should be considered changed and re-indexed
+        """
+        # If both are None, we can't detect change via lastmod - assume no change
+        # (Page will be checked via TTL-based cache invalidation instead)
+        if old_lastmod is None and new_lastmod is None:
+            return False
+
+        # If old had lastmod but new doesn't, assume no change
+        # (Site may have stopped providing lastmod)
+        if old_lastmod is not None and new_lastmod is None:
+            return False
+
+        # If old had no lastmod but new does, consider it an update
+        # (Site started providing lastmod, or we have new info)
+        if old_lastmod is None and new_lastmod is not None:
+            return True
+
+        # Both have lastmod - compare them
+        # Simple string comparison works for ISO 8601 dates
+        return old_lastmod != new_lastmod
+
+    def get_current_sitemap_urls(self) -> dict[str, str | None]:
+        """Get current URLs from sitemap with their lastmod timestamps.
+
+        This is a lightweight method that just fetches the sitemap without
+        fetching page content. Useful for periodic checks.
+
+        Returns:
+            Dict mapping URL -> lastmod timestamp (or None)
+        """
+        result: dict[str, str | None] = {}
+
+        try:
+            # Try sitemap first
+            sitemap_urls = self._discover_sitemap()
+            if sitemap_urls:
+                for url_info in sitemap_urls:
+                    url = url_info.get("url")
+                    if url:
+                        url = self._normalize_url(url)
+                        result[url] = url_info.get("lastmod")
+                return result
+
+            # Fallback to recursive crawl (won't have lastmod)
+            crawled_urls = self._recursive_crawl()
+            for url_info in crawled_urls:
+                url = url_info.get("url")
+                if url:
+                    url = self._normalize_url(url)
+                    result[url] = None  # No lastmod from recursive crawl
+
+            return result
+
+        except Exception as e:
+            logger.error(f"[CRAWLER] Failed to get current sitemap URLs: {e}")
+            return result

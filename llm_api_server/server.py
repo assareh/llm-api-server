@@ -90,8 +90,11 @@ class LLMServer:
                 print("  Install with: pip install flask-limiter")
 
         # Configure logging
-        self.logger = logging.getLogger(f"{name.lower()}.tools")
-        logger_names = logger_names or [f"{name.lower()}.tools", "tools"]
+        # Generate default logger name from app name (sanitized: lowercase, spaces to underscores)
+        default_logger_name = f"{name.lower().replace(' ', '_')}.tools"
+        logger_names = logger_names or [default_logger_name, "tools"]
+        # Use the first logger name as the primary logger
+        self.logger = logging.getLogger(logger_names[0])
 
         if config.DEBUG_TOOLS:
             log_file = Path(config.DEBUG_TOOLS_LOG_FILE)

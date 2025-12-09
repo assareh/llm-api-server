@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2025-12-08
+
+### Added
+- **Periodic RAG Index Updates** - Background thread for automatic sitemap polling and incremental index updates
+  - New `periodic_update_enabled` config option (default: False)
+  - Configurable poll interval via `periodic_update_interval_hours` (default: 1.0)
+  - Minimum interval protection via `periodic_update_min_interval_minutes` (default: 5)
+  - Automatic sitemap change detection comparing `lastmod` timestamps
+  - Incremental FAISS updates - new chunks added without full rebuild
+  - Tombstoning for removed/updated URLs - marks old chunks as deleted
+  - Configurable batch size via `update_batch_size` (default: 50)
+  - Automatic rebuild when tombstone ratio exceeds threshold (`rebuild_threshold`, default: 0.3)
+  - Pause/resume support - yields to user requests during updates
+  - Thread-safe with proper locking and graceful shutdown
+  - Status API via `get_updater_status()` and `force_update_check()`
+  - Console output with `[UPDATER]` prefix for visibility in daemon threads
+  - Implementation: `llm_api_server/rag/updater.py`
+
+- **Sitemap Change Detection** - Efficient change detection for incremental updates
+  - New `get_sitemap_changes()` method compares current sitemap with indexed URLs
+  - Returns `SitemapChanges` dataclass with new, updated, removed, and unchanged URLs
+  - Smart `lastmod` comparison handles missing timestamps gracefully
+  - URLs sorted by `lastmod` descending to prioritize fresh content in batch updates
+
+- **Incremental Index Updates** - Apply sitemap changes without full rebuild
+  - New `apply_incremental_update()` method for efficient updates
+  - Tombstoning system marks removed chunks without FAISS rebuild
+  - New chunks added incrementally to existing FAISS index
+  - BM25 and ensemble retrievers rebuilt with active chunks only
+  - Search automatically filters tombstoned chunks
+  - Configurable auto-rebuild when tombstone ratio too high
+
+### Fixed
+- **Brotli Decompression Errors** - Explicitly exclude Brotli from Accept-Encoding headers
+  - Some servers send `br` encoding but decompression fails
+  - Now uses `Accept-Encoding: gzip, deflate` for all crawler requests
+
+- **Page Cache Hash Consistency** - Fixed hash algorithm mismatch in lastmod lookup
+  - `_get_cached_page_lastmod()` was using MD5 while page cache uses SHA256
+  - Now consistently uses `_get_page_cache_path()` for all cache file lookups
+  - Fixes false "all URLs updated" detection that caused full tombstoning
+
+- **Periodic Updater Startup** - Updater now starts after both `crawl_and_index()` and `load_index()`
+  - Previously only started after `load_index()`, missing fresh builds
+  - Ensures updater runs regardless of how index is initialized
+
+### Changed
+- RAG module now uses consistent SHA256[:32] hashing for all page cache operations
+- Updater prints to stdout with flush for visibility in daemon threads
+- Logger name fix ensures DEBUG_TOOLS logging works correctly
+
 ## [0.9.4] - 2025-12-03
 
 ### Added

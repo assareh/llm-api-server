@@ -318,6 +318,7 @@ The framework includes a comprehensive RAG system in `llm_api_server/rag/`:
 - `DocSearchIndex` - Main indexer with crawling, chunking, embedding, and search
 - `RAGConfig` - Configuration dataclass with all settings
 - `DocumentCrawler` - Web crawler (sitemap + recursive + manual URLs)
+- `PeriodicIndexUpdater` - Background sitemap polling for long-running apps
 - `semantic_chunk_html()` - HTML-aware chunking with parent-child relationships
 
 **Features:**
@@ -329,6 +330,8 @@ The framework includes a comprehensive RAG system in `llm_api_server/rag/`:
 - **Contextual retrieval** - Optional LLM-generated context for ~40-50% better retrieval (Anthropic's approach)
 - **Configurable embedding models** - Fast (MiniLM) to accurate (BGE-large), hot-swappable without re-crawling
 - **Incremental updates** - Check timestamps, only rebuild if stale
+- **Periodic updates** - Background sitemap polling for long-running applications
+- **Tombstone tracking** - Efficient handling of removed/changed pages without full rebuild
 - **Progress bars** - tqdm progress for crawling, fetching, chunking, and embedding
 - **Local-first** - FAISS vector store, HuggingFace embeddings
 
@@ -340,9 +343,10 @@ The framework includes a comprehensive RAG system in `llm_api_server/rag/`:
 
 **Key files:**
 - `config.py` - RAGConfig with all crawling/chunking/search settings
-- `crawler.py` - DocumentCrawler class, robots.txt support, URL filtering
+- `crawler.py` - DocumentCrawler class, robots.txt support, URL filtering, SitemapChanges
 - `chunker.py` - semantic_chunk_html(), token-aware chunking with tiktoken
-- `indexer.py` - DocSearchIndex main class
+- `indexer.py` - DocSearchIndex main class with tombstone tracking
+- `updater.py` - PeriodicIndexUpdater for background sitemap polling
 
 **Usage:**
 ```python
@@ -418,6 +422,52 @@ index.add_contextual_retrieval()  # Run separately, saves progress every 50 chun
 
 Reference: https://www.anthropic.com/news/contextual-retrieval
 
+**Periodic Updates (Long-Running Applications):**
+For applications that run continuously, the RAG module supports automatic background updates
+via sitemap polling. New/changed pages are detected and indexed without restarting the app.
+
+```python
+config = RAGConfig(
+    base_url="https://docs.example.com",
+    cache_dir="./doc_index",
+
+    # Enable periodic updates
+    periodic_update_enabled=True,           # Enable background sitemap polling
+    periodic_update_interval_hours=6.0,     # Check sitemap every 6 hours
+    periodic_update_min_interval_minutes=30.0,  # Minimum between checks
+    update_batch_size=50,                   # Max pages per update cycle
+
+    # Tombstone settings (for handling removed/changed pages)
+    tombstone_rebuild_threshold=0.1,        # Full rebuild when 10% tombstoned
+    auto_rebuild_enabled=True,              # Auto-rebuild when threshold hit
+)
+
+index = DocSearchIndex(config)
+index.crawl_and_index()  # Initial build
+index.load_index()       # Starts background updater automatically
+```
+
+Manual control:
+```python
+# Check updater status
+status = index.get_updater_status()
+print(f"Last check: {status['last_check']}, Next ETA: {status['next_check_eta']}")
+
+# Force immediate check
+result = index.force_update_check()
+print(f"Added: {result.pages_added}, Updated: {result.pages_updated}, Removed: {result.pages_removed}")
+
+# Stop background processing
+index.stop_background_processing()
+```
+
+How it works:
+1. Background thread polls sitemap at configured interval
+2. Compares `lastmod` timestamps with indexed pages
+3. Tombstones removed/changed pages (filtered from search results)
+4. Fetches and indexes new/updated pages incrementally
+5. Triggers full rebuild when tombstone threshold exceeded
+
 **Ported from Ivan:**
 This module was generalized from Ivan's HashiCorp doc search implementation:
 - Removed HashiCorp-specific logic (product extraction, domain-specific synonyms)
@@ -452,5 +502,5 @@ When making changes, test in both projects.
 
 ---
 
-*Last updated: 2025-12-03*
-*Version: 0.9.4*
+*Last updated: 2025-12-08*
+*Version: 0.10.0*

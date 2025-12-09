@@ -95,6 +95,14 @@ class DocSearchIndex:
         self.parent_chunks: dict[str, dict[str, Any]] = {}  # chunk_id -> parent content/metadata
         self.child_to_parent: dict[str, str] = {}  # child_chunk_id -> parent_chunk_id
 
+        # Tombstone tracking for incremental updates
+        self._tombstoned_urls: set[str] = set()  # URLs marked as removed/changed
+        self._tombstoned_chunk_ids: set[str] = set()  # Chunk IDs to filter from search
+        self.tombstones_file = self.cache_dir / "tombstones.json"
+
+        # Periodic updater (lazy-initialized if enabled)
+        self._updater = None
+
         # Crawler
         self.crawler = DocumentCrawler(
             base_url=config.base_url,
@@ -250,8 +258,9 @@ class DocSearchIndex:
             start_time = time.time()
             url_list = self.crawler.discover_and_crawl()
 
-            # Update state
+            # Update state - store full URL info (including lastmod) for cache invalidation
             discovered_urls = [url_info["url"] for url_info in url_list]
+            discovered_url_info = url_list  # Full URL info with lastmod
 
             # Only mark crawl complete if we actually found URLs
             # This prevents caching an empty result from a failed crawl
@@ -260,6 +269,7 @@ class DocSearchIndex:
                 crawl_state.update(
                     {
                         "discovered_urls": discovered_urls,
+                        "discovered_url_info": discovered_url_info,  # Store full info for cache invalidation
                         "crawl_complete": crawl_complete,
                         "max_pages_limit": self.config.max_pages,
                     }
@@ -269,8 +279,14 @@ class DocSearchIndex:
             else:
                 logger.warning("[RAG] Crawl found 0 URLs, not caching result")
         else:
-            logger.info(f"[RAG] Phase 1/4: Using cached URL list ({len(discovered_urls)} URLs)")
-            url_list = [{"url": url} for url in discovered_urls]
+            # Try to use full URL info (with lastmod) if available, otherwise fall back to URL-only
+            discovered_url_info = crawl_state.get("discovered_url_info", [])
+            if discovered_url_info:
+                logger.info(f"[RAG] Phase 1/4: Using cached URL list with lastmod ({len(discovered_url_info)} URLs)")
+                url_list = discovered_url_info
+            else:
+                logger.info(f"[RAG] Phase 1/4: Using cached URL list ({len(discovered_urls)} URLs, no lastmod)")
+                url_list = [{"url": url} for url in discovered_urls]
 
         if not url_list:
             logger.error("[RAG] No URLs discovered!")
@@ -334,15 +350,6 @@ class DocSearchIndex:
         # Identify refreshed pages (pages that were refetched, not from cache)
         refreshed_urls = {page["url"] for page in new_pages if not page.get("from_cache")}
 
-        # Filter pages to chunk: only chunk pages with fresh content, not cached pages
-        # Cached pages already have their chunks in the index, re-chunking would create duplicates
-        pages_to_chunk = [page for page in new_pages if not page.get("from_cache")]
-        cached_page_count = len(new_pages) - len(pages_to_chunk)
-        if cached_page_count > 0:
-            logger.info(
-                f"[RAG] Skipping {cached_page_count} cached pages (already have chunks), chunking {len(pages_to_chunk)} fresh pages"
-            )
-
         # If resuming/expanding/refreshing, load existing chunks first
         if is_resuming or is_expanding or is_refreshing:
             logger.info("[RAG] Loading existing chunks for incremental update...")
@@ -376,14 +383,25 @@ class DocSearchIndex:
                 parent_id = chunk.metadata.get("parent_id")
                 if chunk_id and parent_id:
                     self.child_to_parent[chunk_id] = parent_id
+
+            # For incremental updates, only chunk pages with fresh content (not cached)
+            # Cached pages already have their chunks loaded above
+            pages_to_chunk = [page for page in new_pages if not page.get("from_cache")]
+            cached_page_count = len(new_pages) - len(pages_to_chunk)
+            if cached_page_count > 0:
+                logger.info(
+                    f"[RAG] Skipping {cached_page_count} cached pages (already have chunks), "
+                    f"chunking {len(pages_to_chunk)} fresh pages"
+                )
         else:
-            # Fresh build - initialize empty
+            # Fresh build - initialize empty and chunk ALL pages (including cached)
             logger.info("[RAG] Starting fresh chunking (no existing chunks)...")
             self.chunks = []
             self.parent_chunks = {}
             self.child_to_parent = {}
+            pages_to_chunk = new_pages  # Chunk all pages for fresh build
 
-        # Create chunks from pages with fresh content only (not cached pages)
+        # Create chunks from pages
         new_chunk_count_before = len(self.chunks)
         page_contents = self._create_chunks(pages_to_chunk)
         new_chunk_count = len(self.chunks) - new_chunk_count_before
@@ -474,18 +492,26 @@ class DocSearchIndex:
         logger.info(f"[RAG] Total indexed: {len(indexed_urls_set)} URLs, {len(self.chunks)} chunks")
         logger.info("[RAG] " + "=" * 70)
 
+        # Start periodic updater if enabled (also done in load_index for cached loads)
+        if self.config.periodic_update_enabled:
+            self._start_periodic_updater()
+
     def load_index(self):
         """Load index from cache.
 
         Attempts to load the persisted FAISS index first for fast startup.
         Falls back to rebuilding from chunks if the saved index is missing or corrupted.
         BM25 retriever is always rebuilt (not persisted) but this is fast.
+        Also starts the periodic updater if enabled.
         """
         logger.info("[RAG] Loading index from cache...")
 
         # Load chunks
         self.chunks = self._load_chunks() or []
         self.parent_chunks = self._load_parent_chunks() or {}
+
+        # Load tombstones for incremental updates
+        self._tombstoned_urls, self._tombstoned_chunk_ids = self._load_tombstones()
 
         # Rebuild child_to_parent mapping from chunk metadata
         self.child_to_parent = {}
@@ -572,6 +598,10 @@ class DocSearchIndex:
                 self.start_background_contextualization()
             else:
                 logger.debug("[RAG] Contextual retrieval already completed (skipping background task)")
+
+        # Start periodic updater if enabled
+        if self.config.periodic_update_enabled:
+            self._start_periodic_updater()
 
     def rebuild_embeddings(self):
         """Rebuild FAISS index from saved chunks without re-crawling.
@@ -794,15 +824,62 @@ class DocSearchIndex:
         return page_contents
 
     def pause_background_processing(self):
-        """Pause background contextual retrieval (call when user request starts).
+        """Pause background processing (call when user request starts).
 
         Use this to yield LLM resources to user requests during background processing.
+        Pauses both contextual retrieval and periodic updates.
         """
         self.contextualizer.pause()
+        if self._updater:
+            self._updater.pause()
 
     def resume_background_processing(self):
-        """Resume background contextual retrieval (call when user request completes)."""
+        """Resume background processing (call when user request completes).
+
+        Resumes both contextual retrieval and periodic updates.
+        """
         self.contextualizer.resume()
+        if self._updater:
+            self._updater.resume()
+
+    def stop_background_processing(self):
+        """Stop all background processing (call on shutdown).
+
+        Stops both contextual retrieval and periodic updates gracefully.
+        """
+        self.stop_background_contextualization()
+        if self._updater:
+            self._updater.stop()
+            self._updater = None
+
+    def _start_periodic_updater(self):
+        """Initialize and start the periodic index updater."""
+        from .updater import PeriodicIndexUpdater
+
+        logger.info("[RAG] Starting periodic index updater...")
+        self._updater = PeriodicIndexUpdater(self, self.config)
+        self._updater.start()
+        logger.info(f"[RAG] ✓ Periodic updater started " f"(interval: {self.config.periodic_update_interval_hours}h)")
+
+    def get_updater_status(self) -> dict[str, Any] | None:
+        """Get current periodic updater status.
+
+        Returns:
+            UpdaterStatus dict if updater is active, None otherwise
+        """
+        if self._updater:
+            return self._updater.get_status().to_dict()
+        return None
+
+    def force_update_check(self):
+        """Manually trigger a sitemap check and update.
+
+        Returns:
+            UpdateResult if updater is active, None otherwise
+        """
+        if self._updater:
+            return self._updater.force_check()
+        return None
 
     def search(self, query: str, top_k: int | None = None, return_parent: bool = True) -> list[dict[str, Any]]:
         """Search the document index with hybrid retrieval and re-ranking.
@@ -856,6 +933,9 @@ class DocSearchIndex:
                         result["parent_metadata"] = self.parent_chunks[parent_id].get("metadata")
 
             results.append(result)
+
+        # Filter tombstoned results (from incremental updates)
+        results = self._filter_tombstoned(results)
 
         # Re-rank if enabled
         if self.config.rerank_enabled and results:
@@ -1812,3 +1892,470 @@ class DocSearchIndex:
             )
         else:
             logger.debug(f"[RAG] URL {url} failure count: {count}/{self.config.max_url_retries}")
+
+    # -------------------------------------------------------------------------
+    # Tombstone Management for Incremental Updates
+    # -------------------------------------------------------------------------
+
+    def _load_tombstones(self) -> tuple[set[str], set[str]]:
+        """Load tombstoned URLs and chunk IDs from disk.
+
+        Returns:
+            Tuple of (tombstoned_urls, tombstoned_chunk_ids)
+        """
+        if not self.tombstones_file.exists():
+            return set(), set()
+
+        try:
+            data = json.loads(self.tombstones_file.read_text())
+            urls = set(data.get("tombstoned_urls", []))
+            chunk_ids = set(data.get("tombstoned_chunk_ids", []))
+            logger.info(f"[RAG] Loaded tombstones: {len(urls)} URLs, {len(chunk_ids)} chunks")
+            return urls, chunk_ids
+        except Exception as e:
+            logger.warning(f"[RAG] Failed to load tombstones: {e}")
+            return set(), set()
+
+    def _save_tombstones(self):
+        """Save tombstoned URLs and chunk IDs to disk."""
+        try:
+            data = {
+                "tombstoned_urls": list(self._tombstoned_urls),
+                "tombstoned_chunk_ids": list(self._tombstoned_chunk_ids),
+                "last_updated": datetime.now().isoformat(),
+            }
+            self.tombstones_file.write_text(json.dumps(data, indent=2))
+            logger.debug(
+                f"[RAG] Saved tombstones: {len(self._tombstoned_urls)} URLs, {len(self._tombstoned_chunk_ids)} chunks"
+            )
+        except Exception as e:
+            logger.error(f"[RAG] Failed to save tombstones: {e}")
+
+    def _tombstone_url(self, url: str):
+        """Mark all chunks from a URL as tombstoned.
+
+        Tombstoned chunks are filtered out of search results but remain in
+        the FAISS index until a full rebuild is triggered.
+
+        Args:
+            url: The URL whose chunks should be tombstoned
+        """
+        self._tombstoned_urls.add(url)
+
+        # Find all chunks from this URL and mark them
+        chunks_tombstoned = 0
+        for chunk in self.chunks:
+            if chunk.metadata.get("url") == url:
+                chunk_id = chunk.metadata.get("chunk_id")
+                if chunk_id:
+                    self._tombstoned_chunk_ids.add(chunk_id)
+                    chunks_tombstoned += 1
+
+        logger.debug(f"[RAG] Tombstoned {chunks_tombstoned} chunks from URL: {url}")
+
+    def _clear_tombstones(self):
+        """Clear all tombstones (after full rebuild)."""
+        count = len(self._tombstoned_urls)
+        self._tombstoned_urls.clear()
+        self._tombstoned_chunk_ids.clear()
+
+        # Also delete the tombstones file
+        if self.tombstones_file.exists():
+            try:
+                self.tombstones_file.unlink()
+            except Exception as e:
+                logger.warning(f"[RAG] Failed to delete tombstones file: {e}")
+
+        logger.info(f"[RAG] Cleared {count} tombstoned URLs")
+
+    def _filter_tombstoned(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Filter tombstoned chunks from search results.
+
+        Args:
+            results: List of search result dicts
+
+        Returns:
+            Filtered list with tombstoned results removed
+        """
+        if not self._tombstoned_chunk_ids:
+            return results
+
+        filtered = []
+        for result in results:
+            chunk_id = result.get("metadata", {}).get("chunk_id")
+            if chunk_id and chunk_id in self._tombstoned_chunk_ids:
+                continue  # Skip tombstoned
+            filtered.append(result)
+
+        removed = len(results) - len(filtered)
+        if removed > 0:
+            logger.debug(f"[RAG] Filtered {removed} tombstoned results from search")
+
+        return filtered
+
+    def _should_rebuild(self) -> bool:
+        """Check if tombstone threshold has been exceeded.
+
+        Returns:
+            True if a full rebuild should be triggered
+        """
+        if not self.chunks:
+            return False
+
+        total_chunks = len(self.chunks)
+        tombstone_count = len(self._tombstoned_chunk_ids)
+
+        if total_chunks == 0:
+            return False
+
+        tombstone_ratio = tombstone_count / total_chunks
+        threshold = self.config.tombstone_rebuild_threshold
+
+        if tombstone_ratio >= threshold:
+            logger.info(
+                f"[RAG] Tombstone threshold exceeded: {tombstone_ratio:.1%} >= {threshold:.0%} "
+                f"({tombstone_count}/{total_chunks} chunks)"
+            )
+            return True
+
+        return False
+
+    def get_tombstone_stats(self) -> dict[str, Any]:
+        """Get current tombstone statistics.
+
+        Returns:
+            Dict with tombstone counts and percentages
+        """
+        total_chunks = len(self.chunks)
+        tombstone_count = len(self._tombstoned_chunk_ids)
+        tombstone_urls = len(self._tombstoned_urls)
+
+        return {
+            "tombstoned_urls": tombstone_urls,
+            "tombstoned_chunks": tombstone_count,
+            "total_chunks": total_chunks,
+            "tombstone_percentage": (tombstone_count / total_chunks * 100) if total_chunks > 0 else 0,
+            "threshold_percentage": self.config.tombstone_rebuild_threshold * 100,
+            "rebuild_needed": self._should_rebuild(),
+        }
+
+    # -------------------------------------------------------------------------
+    # Incremental Update Support
+    # -------------------------------------------------------------------------
+
+    def get_indexed_urls_with_lastmod(self) -> dict[str, str | None]:
+        """Get all indexed URLs with their lastmod timestamps.
+
+        This is used by the periodic updater to compare against the current sitemap.
+        Falls back to extracting URLs from loaded chunks if crawl_state is missing.
+
+        Returns:
+            Dict mapping URL -> lastmod timestamp (or None)
+        """
+        crawl_state = self._load_crawl_state()
+        indexed_urls = crawl_state.get("indexed_urls", [])
+
+        # If crawl_state is empty but we have chunks loaded, derive URLs from chunks
+        if not indexed_urls and self.chunks:
+            logger.info("[RAG] Deriving indexed URLs from loaded chunks (crawl_state missing)")
+            seen_urls: set[str] = set()
+            for chunk in self.chunks:
+                # Try both 'url' (current) and 'source' (legacy) metadata keys
+                url = chunk.metadata.get("url") or chunk.metadata.get("source")
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+            indexed_urls = list(seen_urls)
+            logger.info(f"[RAG] Found {len(indexed_urls)} unique URLs in chunks")
+
+        # Build lookup from cached pages
+        result: dict[str, str | None] = {}
+        for url in indexed_urls:
+            # Try to get lastmod from page cache
+            lastmod = self._get_cached_page_lastmod(url)
+            result[url] = lastmod
+
+        return result
+
+    def _get_cached_page_lastmod(self, url: str) -> str | None:
+        """Get the lastmod timestamp for a cached page.
+
+        Args:
+            url: The page URL
+
+        Returns:
+            lastmod timestamp string or None
+        """
+        # Use the same cache path method as save/load for consistency
+        cache_file = self._get_page_cache_path(url)
+
+        if not cache_file.exists():
+            return None
+
+        try:
+            data = json.loads(cache_file.read_text())
+            return data.get("lastmod")
+        except Exception:
+            return None
+
+    def _create_crawler(self) -> DocumentCrawler:
+        """Create a new crawler instance for sitemap checking.
+
+        Returns:
+            New DocumentCrawler with current config
+        """
+        return DocumentCrawler(
+            base_url=self.config.base_url,
+            cache_dir=self.cache_dir,
+            manual_urls=self.config.manual_urls,
+            manual_urls_only=self.config.manual_urls_only,
+            max_crawl_depth=self.config.max_crawl_depth,
+            rate_limit_delay=self.config.rate_limit_delay,
+            max_workers=self.config.max_workers,
+            max_pages=self.config.max_pages,
+            request_timeout=self.config.request_timeout,
+            url_include_patterns=self.config.url_include_patterns,
+            url_exclude_patterns=self.config.url_exclude_patterns,
+            show_progress=self.config.show_progress,
+        )
+
+    def apply_incremental_update(self, changes):
+        """Apply sitemap changes to the index incrementally.
+
+        This method handles:
+        - Tombstoning removed URLs
+        - Tombstoning changed URLs (before re-adding)
+        - Fetching and indexing new/changed pages
+        - Triggering rebuild if threshold exceeded
+
+        Args:
+            changes: SitemapChanges from crawler.get_sitemap_changes()
+
+        Returns:
+            UpdateResult with counts and status
+        """
+        from .updater import UpdateResult
+
+        result = UpdateResult()
+        start_time = time.time()
+
+        try:
+            # Load current state if not already loaded
+            if not self.chunks:
+                logger.info("[RAG] Loading existing chunks for incremental update...")
+                self.chunks = self._load_chunks() or []
+                self.parent_chunks = self._load_parent_chunks() or {}
+                # Rebuild child_to_parent mapping
+                self.child_to_parent = {}
+                for chunk in self.chunks:
+                    chunk_id = chunk.metadata.get("chunk_id")
+                    parent_id = chunk.metadata.get("parent_id")
+                    if chunk_id and parent_id:
+                        self.child_to_parent[chunk_id] = parent_id
+                logger.info(f"[RAG] Loaded {len(self.chunks)} chunks, {len(self.parent_chunks)} parent chunks")
+
+            # Safety check: don't proceed if we have no chunks
+            # This prevents corrupting an empty/uninitialized index
+            if not self.chunks:
+                logger.error("[RAG] Cannot apply incremental update: no existing chunks loaded")
+                result.success = False
+                result.error = "No existing chunks - run crawl_and_index() first"
+                return result
+
+            # Load current tombstones
+            self._tombstoned_urls, self._tombstoned_chunk_ids = self._load_tombstones()
+
+            # 1. Tombstone removed URLs
+            for url in changes.removed_urls:
+                self._tombstone_url(url)
+                result.pages_removed += 1
+
+            # 2. Tombstone changed URLs (will re-add with new content)
+            for url, _new_lastmod, _old_lastmod in changes.updated_urls:
+                self._tombstone_url(url)
+
+            # Save tombstones
+            self._save_tombstones()
+
+            # 3. Collect URLs to fetch (new + updated)
+            urls_to_fetch = []
+            for url in changes.new_urls:
+                urls_to_fetch.append({"url": url, "lastmod": None})
+
+            for url, new_lastmod, _old_lastmod in changes.updated_urls:
+                urls_to_fetch.append({"url": url, "lastmod": new_lastmod})
+
+            # Sort by lastmod descending (most recent first) so we prioritize fresh content
+            # URLs without lastmod go to the end
+            urls_to_fetch.sort(key=lambda x: x.get("lastmod") or "", reverse=True)
+
+            # Apply batch size limit
+            batch_size = self.config.update_batch_size
+            if len(urls_to_fetch) > batch_size:
+                logger.info(f"[RAG] Limiting update to {batch_size} pages (found {len(urls_to_fetch)})")
+                urls_to_fetch = urls_to_fetch[:batch_size]
+
+            # 4. Fetch pages
+            if urls_to_fetch:
+                crawl_state = self._load_crawl_state()
+                failed_urls = crawl_state.get("failed_urls", {})
+
+                pages, failed_urls = self._fetch_pages(urls_to_fetch, failed_urls, force_refresh=True)
+
+                # Save failed_urls immediately (safe to persist failures)
+                crawl_state["failed_urls"] = failed_urls
+                self._save_crawl_state(crawl_state)
+
+                # 5. Chunk new pages
+                if pages:
+                    # Track chunk count before to calculate new chunks added
+                    chunks_before = len(self.chunks)
+
+                    # _create_chunks modifies self.chunks and self.parent_chunks in place
+                    # and returns page_contents dict for contextual retrieval
+                    self._create_chunks(pages)
+
+                    # Get the new chunks that were added
+                    new_chunks = self.chunks[chunks_before:]
+                    result.chunks_added = len(new_chunks)
+
+                    if new_chunks:
+                        # Save updated chunks
+                        self._save_chunks()
+                        self._save_parent_chunks()
+
+                        # 6. Update FAISS index incrementally
+                        self._add_chunks_to_index(new_chunks)
+
+                        logger.info(f"[RAG] Added {len(new_chunks)} new chunks to index")
+
+                        # Only mark URLs as indexed AFTER successful chunking and indexing
+                        indexed_urls = set(crawl_state.get("indexed_urls", []))
+                        for page in pages:
+                            indexed_urls.add(page["url"])
+                        crawl_state["indexed_urls"] = list(indexed_urls)
+                        self._save_crawl_state(crawl_state)
+
+                result.pages_added = len([p for p in pages if p["url"] in changes.new_urls])
+                result.pages_updated = len([p for p in pages if p["url"] in [u for u, _, _ in changes.updated_urls]])
+
+            result.chunks_removed = len(self._tombstoned_chunk_ids)
+
+            # 7. Check if rebuild needed
+            if self._should_rebuild() and self.config.auto_rebuild_enabled:
+                logger.info("[RAG] Tombstone threshold exceeded, triggering full rebuild")
+                result.triggered_rebuild = True
+                self._trigger_full_rebuild()
+
+            result.success = True
+            result.duration_seconds = time.time() - start_time
+
+        except Exception as e:
+            result.success = False
+            result.error = str(e)
+            result.duration_seconds = time.time() - start_time
+            logger.error(f"[RAG] Incremental update failed: {e}", exc_info=True)
+
+        return result
+
+    def _add_chunks_to_index(self, new_chunks: list[Document]):
+        """Add new chunks to the FAISS index incrementally.
+
+        Args:
+            new_chunks: List of new Document chunks to add
+        """
+        if not self.vectorstore or not new_chunks:
+            return
+
+        try:
+            # Add to FAISS vectorstore
+            self.vectorstore.add_documents(new_chunks)
+            logger.debug(f"[RAG] Added {len(new_chunks)} chunks to FAISS")
+
+            # Rebuild BM25 (must include all chunks, fast operation)
+            self._rebuild_bm25()
+
+            # Rebuild ensemble retriever
+            self._rebuild_ensemble()
+
+            # Save updated FAISS index
+            faiss_path = str(self.index_dir / "faiss_index")
+            self.vectorstore.save_local(faiss_path)
+            self._save_faiss_checksum(faiss_path)
+
+        except Exception as e:
+            logger.error(f"[RAG] Failed to add chunks to index: {e}")
+
+    def _rebuild_bm25(self):
+        """Rebuild BM25 retriever with all non-tombstoned chunks."""
+        # Filter out tombstoned chunks
+        active_chunks = [c for c in self.chunks if c.metadata.get("chunk_id") not in self._tombstoned_chunk_ids]
+
+        if not active_chunks:
+            logger.warning("[RAG] No active chunks for BM25")
+            return
+
+        k = self.config.search_top_k * self.config.retriever_candidate_multiplier
+        self.bm25_retriever = BM25Retriever.from_documents(active_chunks, k=k)
+        logger.debug(f"[RAG] Rebuilt BM25 with {len(active_chunks)} active chunks")
+
+    def _rebuild_ensemble(self):
+        """Rebuild ensemble retriever with current retrievers."""
+        if not self.bm25_retriever or not self.vectorstore:
+            return
+
+        k = self.config.search_top_k * self.config.retriever_candidate_multiplier
+        semantic_retriever = self.vectorstore.as_retriever(search_kwargs={"k": k})
+
+        self.ensemble_retriever = EnsembleRetriever(
+            retrievers=[self.bm25_retriever, semantic_retriever],
+            weights=[self.config.hybrid_bm25_weight, self.config.hybrid_semantic_weight],
+        )
+        logger.debug("[RAG] Rebuilt ensemble retriever")
+
+    def _trigger_full_rebuild(self):
+        """Trigger a full index rebuild to clean up tombstones.
+
+        This removes tombstoned chunks and rebuilds the FAISS index from scratch.
+        """
+        logger.info("[RAG] Starting full index rebuild...")
+
+        # Filter out tombstoned chunks
+        active_chunks = [c for c in self.chunks if c.metadata.get("chunk_id") not in self._tombstoned_chunk_ids]
+
+        # Also filter parent chunks
+        active_parent_ids = {c.metadata.get("parent_chunk_id") for c in active_chunks}
+        active_parent_chunks = {k: v for k, v in self.parent_chunks.items() if k in active_parent_ids}
+
+        # Update storage
+        self.chunks = active_chunks
+        self.parent_chunks = active_parent_chunks
+
+        # Rebuild child_to_parent mapping
+        self.child_to_parent = {}
+        for chunk in self.chunks:
+            child_id = chunk.metadata.get("chunk_id")
+            parent_id = chunk.metadata.get("parent_chunk_id")
+            if child_id and parent_id:
+                self.child_to_parent[child_id] = parent_id
+
+        # Save cleaned chunks
+        self._save_chunks()
+        self._save_parent_chunks()
+
+        # Rebuild FAISS from scratch
+        if self.embeddings and self.chunks:
+            logger.info(f"[RAG] Rebuilding FAISS with {len(self.chunks)} chunks")
+            self.vectorstore = FAISS.from_documents(self.chunks, self.embeddings)
+
+            faiss_path = str(self.index_dir / "faiss_index")
+            self.vectorstore.save_local(faiss_path)
+            self._save_faiss_checksum(faiss_path)
+
+        # Rebuild retrievers
+        self._rebuild_bm25()
+        self._rebuild_ensemble()
+
+        # Clear tombstones
+        self._clear_tombstones()
+
+        logger.info(f"[RAG] Full rebuild complete: {len(self.chunks)} active chunks")
