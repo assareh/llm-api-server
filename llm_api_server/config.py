@@ -1,6 +1,7 @@
 """Base configuration for LLM API Server."""
 
-from typing import Literal
+from collections.abc import Callable
+from typing import Any, Literal
 
 
 def _parse_bool_env(value: str, default: bool) -> bool:
@@ -79,6 +80,10 @@ class ServerConfig:
 
     # Custom prompt suggestions for WebUI (list of dicts with title and content)
     DEFAULT_PROMPT_SUGGESTIONS: list | None = None
+
+    # Request hook for debugging/logging LLM requests
+    # Called with (backend_name: str, payload: dict) before each request
+    REQUEST_HOOK: Callable[[str, dict[str, Any]], None] | None = None
 
     @classmethod
     def from_env(cls, env_prefix: str = ""):

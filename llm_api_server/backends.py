@@ -122,6 +122,10 @@ def call_ollama(
     # Set timeout as tuple (connect_timeout, read_timeout)
     timeout = (config.BACKEND_CONNECT_TIMEOUT, config.BACKEND_READ_TIMEOUT)
 
+    # Call request hook if configured (for debugging/logging)
+    if config.REQUEST_HOOK:
+        config.REQUEST_HOOK("ollama", payload)
+
     # Wrap the request in retry logic (uses session for connection pooling)
     def _make_request():
         session = _get_session()
@@ -181,6 +185,10 @@ def call_lmstudio(
 
     # Set timeout as tuple (connect_timeout, read_timeout)
     timeout = (config.BACKEND_CONNECT_TIMEOUT, config.BACKEND_READ_TIMEOUT)
+
+    # Call request hook if configured (for debugging/logging)
+    if config.REQUEST_HOOK:
+        config.REQUEST_HOOK("lmstudio", payload)
 
     # Wrap the request in retry logic (uses session for connection pooling)
     def _make_request():

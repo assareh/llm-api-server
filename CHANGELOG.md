@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2025-12-09
+
+### Added
+- **Request Hook** - Configurable callback for debugging/logging LLM requests
+  - New `REQUEST_HOOK` config option: `Callable[[str, dict], None] | None`
+  - Called with `(backend_name, payload)` before each request to Ollama or LM Studio
+  - Enables request logging, debugging, and monitoring without monkey-patching
+  - Example usage:
+    ```python
+    def log_request(backend: str, payload: dict):
+        print(f"[{backend}] {json.dumps(payload)}")
+
+    config.REQUEST_HOOK = log_request
+    ```
+
 ## [0.10.0] - 2025-12-08
 
 ### Added
