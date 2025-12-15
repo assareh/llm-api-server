@@ -210,8 +210,7 @@ print(f"Updated {result.changed} pages, removed {result.removed}, {result.unchan
 
 - [HTTP Conditional Requests (MDN)](https://developer.mozilla.org/en-US/docs/Web/HTTP/Conditional_requests)
 - [FAISS IndexIDMap](https://github.com/facebookresearch/faiss/wiki/Pre--and-post-processing#idmap-converting-between-index-ids-and-dataset-ids)
-- [Original feedback from Ivan team](https://github.com/assareh/llm-tools-server)
 
 ## Origin
 
-This feature request originated from feedback from the Ivan (HashiCorp documentation assistant) team, who identified incremental updates as a key optimization for production use with large documentation sites.
+This feature provides incremental index updates as a key optimization for production use with large documentation sites.

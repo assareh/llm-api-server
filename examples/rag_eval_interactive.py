@@ -7,8 +7,8 @@ test cases by reviewing search results and marking relevant ones.
 Usage:
     uv run python examples/rag_eval_interactive.py --index-dir ./my_index
 
-    # Or use Ivan's index:
-    uv run python examples/rag_eval_interactive.py --index-dir ~/Developer/Ivan/hashicorp_docs_index
+    # Or use a custom index directory:
+    uv run python examples/rag_eval_interactive.py --index-dir ~/path/to/your/index
 """
 
 import argparse

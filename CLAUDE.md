@@ -99,7 +99,7 @@ When adding new features, consider:
 - **Backwards compatibility**: This is used by multiple projects
 - **Configuration options**: Make features configurable
 - **Documentation**: Update README.md and docstrings
-- **Examples**: Update consuming projects (Ivan, milesoss)
+- **Examples**: Update consuming projects as needed
 
 ## Testing
 
@@ -107,12 +107,12 @@ Since this is a framework library:
 
 1. **Local testing**: Install in consuming project
    ```bash
-   cd ../milesoss  # or ../Ivan
+   cd ../myproject
    uv sync  # Will pull llm-tools-server from GitHub
-   uv run python milesoss.py --no-webui
+   uv run python myapp.py --no-webui
    ```
 
-2. **Integration testing**: Verify in both Ivan and milesoss
+2. **Integration testing**: Verify in consuming projects
 
 3. **API testing**: Test OpenAI-compatible endpoints
    ```bash
@@ -468,13 +468,6 @@ How it works:
 4. Fetches and indexes new/updated pages incrementally
 5. Triggers full rebuild when tombstone threshold exceeded
 
-**Ported from Ivan:**
-This module was generalized from Ivan's HashiCorp doc search implementation:
-- Removed HashiCorp-specific logic (product extraction, domain-specific synonyms)
-- Made crawling more general (works with any doc site)
-- Kept all advanced features (parent-child chunking, hybrid search, re-ranking)
-- Added configurable crawling modes (sitemap + recursive + manual)
-
 **Dependencies (optional `--extra rag`):**
 - langchain, langchain-community, langchain-huggingface
 - faiss-cpu (vector store)
@@ -483,14 +476,6 @@ This module was generalized from Ivan's HashiCorp doc search implementation:
 - tiktoken (token counting)
 - rank-bm25 (keyword search)
 - tqdm (progress bars)
-
-## Consuming Projects
-
-Current projects using this framework:
-- **Ivan**: HashiCorp documentation assistant
-- **milesoss**: Credit card rewards optimizer
-
-When making changes, test in both projects.
 
 ## Resources
 
