@@ -13,10 +13,10 @@ from .config import ServerConfig
 from .server import LLMServer
 
 # Optional modules available but not imported by default to avoid dependency bloat:
-# - Eval module: from llm_api_server.eval import Evaluator, TestCase, etc.
-# - RAG module: from llm_api_server.rag import DocSearchIndex, RAGConfig
+# - Eval module: from llm_tools_server.eval import Evaluator, TestCase, etc.
+# - RAG module: from llm_tools_server.rag import DocSearchIndex, RAGConfig
 
-__version__ = version("llm-api-server")
+__version__ = version("llm-tools-server")
 __all__ = [
     "BUILTIN_TOOLS",
     "LLMServer",

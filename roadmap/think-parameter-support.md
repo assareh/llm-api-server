@@ -2,7 +2,7 @@
 
 ## Summary
 
-Add support for the `think` parameter in llm-api-server to enable extended thinking/reasoning capabilities for models that support it (DeepSeek R1, Qwen3, gpt-oss, etc.).
+Add support for the `think` parameter in llm-tools-server to enable extended thinking/reasoning capabilities for models that support it (DeepSeek R1, Qwen3, gpt-oss, etc.).
 
 ## Background
 

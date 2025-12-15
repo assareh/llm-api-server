@@ -377,4 +377,4 @@ Planned features:
 
 ## License
 
-Same as llm-api-server parent project.
+Same as llm-tools-server parent project.

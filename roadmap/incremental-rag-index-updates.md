@@ -210,7 +210,7 @@ print(f"Updated {result.changed} pages, removed {result.removed}, {result.unchan
 
 - [HTTP Conditional Requests (MDN)](https://developer.mozilla.org/en-US/docs/Web/HTTP/Conditional_requests)
 - [FAISS IndexIDMap](https://github.com/facebookresearch/faiss/wiki/Pre--and-post-processing#idmap-converting-between-index-ids-and-dataset-ids)
-- [Original feedback from Ivan team](https://github.com/assareh/llm-api-server)
+- [Original feedback from Ivan team](https://github.com/assareh/llm-tools-server)
 
 ## Origin
 

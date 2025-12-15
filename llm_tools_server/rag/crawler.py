@@ -76,7 +76,7 @@ class SitemapChanges:
 
 
 # Default user agent for crawling
-DEFAULT_USER_AGENT = "RAG-DocBot/1.0 (Respectful crawler; +https://github.com/assareh/llm-api-server)"
+DEFAULT_USER_AGENT = "RAG-DocBot/1.0 (Respectful crawler; +https://github.com/assareh/llm-tools-server)"
 
 
 class DocumentCrawler:

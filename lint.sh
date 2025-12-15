@@ -14,13 +14,13 @@ NC='\033[0m' # No Color
 
 # Print header
 echo -e "${BLUE}${BOLD}╔════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}${BOLD}║    LLM API Server Linting Routine      ║${NC}"
+echo -e "${BLUE}${BOLD}║   LLM Tools Server Linting Routine     ║${NC}"
 echo -e "${BLUE}${BOLD}╚════════════════════════════════════════╝${NC}"
 echo ""
 
 # Check if we're in the right directory
-if [ ! -d "llm_api_server" ]; then
-    echo -e "${RED}Error: llm_api_server/ not found. Please run from llm-api-server/ directory.${NC}"
+if [ ! -d "llm_tools_server" ]; then
+    echo -e "${RED}Error: llm_tools_server/ not found. Please run from llm-tools-server/ directory.${NC}"
     exit 1
 fi
 
@@ -53,7 +53,7 @@ echo -e "${GREEN}✓ All required tools found${NC}"
 echo ""
 
 # Parse command line arguments
-TARGET="${1:-llm_api_server}"  # Default to llm_api_server directory
+TARGET="${1:-llm_tools_server}"  # Default to llm_tools_server directory
 FIX_MODE="${2:-fix}"  # Default to fix mode
 
 # Count Python files
@@ -110,7 +110,7 @@ echo ""
 # Optional: MyPy type checking
 if command_exists mypy; then
     echo -e "${BLUE}${BOLD}[Optional] MyPy type checking available${NC}"
-    echo -e "${YELLOW}Run manually: mypy llm_api_server/${NC}"
+    echo -e "${YELLOW}Run manually: mypy llm_tools_server/${NC}"
     echo ""
 fi
 
@@ -127,9 +127,9 @@ fi
 echo ""
 
 echo -e "${BLUE}Usage examples:${NC}"
-echo -e "  ${BOLD}./lint.sh${NC}                    # Lint llm_api_server/"
+echo -e "  ${BOLD}./lint.sh${NC}                    # Lint llm_tools_server/"
 echo -e "  ${BOLD}./lint.sh setup.py${NC}           # Lint specific file"
-echo -e "  ${BOLD}./lint.sh llm_api_server check${NC}  # Check only (no auto-fix)"
+echo -e "  ${BOLD}./lint.sh llm_tools_server check${NC}  # Check only (no auto-fix)"
 echo ""
 
 exit $FINAL_STATUS
