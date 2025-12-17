@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2025-12-17
+
+### Fixed
+- **RAG Crawler www/non-www Redirects** - Handle sites that redirect between www and apex domains
+  - Sites like `example.com` → `www.example.com` were being blocked as "external redirects"
+  - New `_is_same_site()` helper normalizes domains by stripping `www.` prefix before comparison
+  - Fixes both `fetch_page()` redirect check and `_recursive_crawl()` external link filtering
+
 ## [0.12.0] - 2025-12-17
 
 ### Changed
