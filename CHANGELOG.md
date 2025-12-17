@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2025-12-17
+
+### Changed
+- **RAG Content Extraction** - Replace readability-lxml with trafilatura
+  - Trafilatura is designed specifically for web content extraction
+  - Better boilerplate removal (navigation, ads, subscription boxes, footers)
+  - Improved extraction on diverse page layouts
+  - Rescues pages where readability-lxml returned minimal content
+  - Cleaner output for RAG indexing with less noise
+  - Index version bumped to `1.2.0-trafilatura` (forces re-index on upgrade)
+
 ## [0.11.1] - 2025-12-09
 
 ### Fixed
@@ -296,7 +307,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RAG Readability Empty Output** - Detect and handle readability failures
   - Now detects when readability returns empty/near-empty content (<100 bytes)
   - Falls back to semantic HTML extraction (article/main tags) when readability fails
-  - Fixes extraction for sites like frequentmiler.com where readability returns nothing
+  - Fixes extraction for sites like where readability returns nothing
 
 ## [0.6.2] - 2025-11-27
 

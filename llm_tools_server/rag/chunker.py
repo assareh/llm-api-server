@@ -115,7 +115,7 @@ def semantic_chunk_html(
     """
     soup = BeautifulSoup(html, "html.parser")
 
-    # Remove boilerplate elements that may remain after readability extraction
+    # Remove boilerplate elements that may remain after trafilatura extraction
     # (especially when fallback to <main>/<article> tags or original HTML is used)
     for selector in BOILERPLATE_SELECTORS:
         for element in soup.select(selector):

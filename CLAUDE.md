@@ -473,6 +473,7 @@ How it works:
 - faiss-cpu (vector store)
 - sentence-transformers (cross-encoder re-ranking)
 - beautifulsoup4 (HTML parsing)
+- trafilatura (web content extraction)
 - tiktoken (token counting)
 - rank-bm25 (keyword search)
 - tqdm (progress bars)
@@ -487,5 +488,5 @@ How it works:
 
 ---
 
-*Last updated: 2025-12-08*
-*Version: 0.10.0*
+*Last updated: 2025-12-17*
+*Version: 0.12.0*
