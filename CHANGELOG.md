@@ -323,7 +323,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RAG Readability Fallback** - Smart content extraction when code blocks stripped
   - When readability strips >50% of code blocks, tries semantic HTML extraction
   - Extraction priority: `mdxContent` div → `<article>` → `<main>` → original HTML
-  - For HashiCorp docs: reduces content from ~200KB to ~12KB while preserving all code
+  - For MDX/Next.js docs: reduces content from ~200KB to ~12KB while preserving all code
   - Works with any site using semantic HTML5 structure
 
 ## [0.6.1] - 2025-11-27
@@ -465,7 +465,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Requires optional `websearch` extra: `uv sync --extra websearch`
   - Uses `OLLAMA_API_KEY` from config if available
   - Graceful fallback to DuckDuckGo when API unavailable or rate-limited
-  - Site filtering support (e.g., `site:hashicorp.com query`)
+  - Site filtering support (e.g., `site:example.com query`)
   - Implementation: `llm_tools_server/web_search_tool.py`
 
 - **Enhanced HTML Reports** - Beautiful markdown-formatted evaluation reports

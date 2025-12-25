@@ -253,7 +253,7 @@ The framework provides reusable tools:
 **Optional (requires `--extra websearch` and `OLLAMA_API_KEY`):**
 - `create_web_search_tool(config)` - Web search using Ollama API:
   - Requires `OLLAMA_API_KEY` to be configured
-  - Supports site filtering: `site:hashicorp.com query`
+  - Supports site filtering: `site:example.com query`
   - Implementation: `llm_tools_server/web_search_tool.py`
 
 **Optional (requires `--extra rag`):**

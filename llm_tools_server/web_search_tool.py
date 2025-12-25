@@ -75,7 +75,7 @@ def web_search(query: str, max_results: int = 5, site: str = "", ollama_api_key:
     Args:
         query: The search query
         max_results: Maximum number of results (default 5)
-        site: Optional site restriction (e.g., 'hashicorp.com')
+        site: Optional site restriction (e.g., 'example.com')
         ollama_api_key: Ollama API key (required)
 
     Returns:

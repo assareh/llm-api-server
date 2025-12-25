@@ -143,7 +143,7 @@ class DocumentCrawler:
         # If base URL is a subdomain, also try the root domain
         parsed = urlparse(self.base_url)
         domain_parts = parsed.netloc.split(".")
-        if len(domain_parts) > 2:  # e.g., developer.hashicorp.com -> hashicorp.com
+        if len(domain_parts) > 2:  # e.g., docs.example.com -> example.com
             root_domain = ".".join(domain_parts[-2:])
             root_url = f"{parsed.scheme}://{root_domain}"
             robots_urls_to_try.append(urljoin(root_url, "/robots.txt"))

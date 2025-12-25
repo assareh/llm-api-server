@@ -1206,7 +1206,7 @@ class DocSearchIndex:
         """Extract content from semantic HTML elements as fallback.
 
         Tries to find the most specific content container:
-        1. div with 'mdxContent' class (HashiCorp/Next.js MDX content)
+        1. div with 'mdxContent' class (Next.js MDX content)
         2. <article> tag
         3. <main> tag
 
@@ -1219,7 +1219,7 @@ class DocSearchIndex:
         try:
             soup = BeautifulSoup(html, "html.parser")
 
-            # Try mdxContent div first (HashiCorp docs specific, very clean)
+            # Try mdxContent div first (MDX/Next.js docs, very clean)
             mdx_content = soup.find("div", class_=lambda x: x and "mdxContent" in x)
             if mdx_content:
                 return str(mdx_content)

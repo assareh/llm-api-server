@@ -34,11 +34,11 @@ def test_web_search_calls_ollama_and_formats_results():
 
     with patch("llm_tools_server.web_search_tool.ollama_web_search", return_value=fake_results) as mock_search:
         tool = create_web_search_tool(config)
-        output = tool.func(query="vault", max_results=1, site="hashicorp.com")
+        output = tool.func(query="python", max_results=1, site="example.com")
 
     mock_search.assert_called_once()
     called_query = mock_search.call_args[0][0]
-    assert called_query.startswith("site:hashicorp.com")
+    assert called_query.startswith("site:example.com")
     assert "Result One" in output
     assert "https://example.com/1" in output
 

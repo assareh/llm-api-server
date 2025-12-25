@@ -119,7 +119,7 @@ class WebSearchInput(BaseModel):
         description="The search query (e.g., 'Python async programming best practices', 'Docker container networking')"
     )
     max_results: int = Field(default=5, description="Maximum number of results to return. Default is 5.")
-    site: str = Field(default="", description="Optional site restriction (e.g., 'hashicorp.com')")
+    site: str = Field(default="", description="Optional site restriction (e.g., 'example.com')")
 
 
 class DocSearchInput(BaseModel):

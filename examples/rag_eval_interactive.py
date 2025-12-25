@@ -143,7 +143,7 @@ def main():
     parser.add_argument(
         "--index-dir",
         type=str,
-        default="./hashicorp_docs_index",
+        default="./docs_index",
         help="Path to RAG index directory",
     )
     parser.add_argument(
@@ -155,7 +155,7 @@ def main():
     parser.add_argument(
         "--base-url",
         type=str,
-        default="https://developer.hashicorp.com",
+        default="https://docs.example.com",
         help="Base URL (only used if building new index)",
     )
     args = parser.parse_args()

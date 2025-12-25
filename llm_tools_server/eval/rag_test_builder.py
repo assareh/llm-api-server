@@ -156,27 +156,27 @@ from llm_tools_server.eval import RAGTestCase, RAGEvaluator, load_test_cases
 # Option 1: Define test cases in code
 tests = [
     RAGTestCase(
-        query="how to configure vault namespaces",
-        description="Vault namespace configuration docs",
+        query="how to configure user authentication",
+        description="User authentication configuration docs",
         relevant_urls=[
-            "https://developer.hashicorp.com/vault/docs/enterprise/namespaces",
-            "https://developer.hashicorp.com/vault/tutorials/enterprise/namespaces",
+            "https://docs.example.com/auth/configuration",
+            "https://docs.example.com/auth/tutorials/setup",
         ],
         top_k=5,
     ),
     RAGTestCase(
-        query="terraform state locking",
-        description="Terraform state locking documentation",
+        query="database connection pooling",
+        description="Database connection pooling documentation",
         relevant_urls=[
-            "https://developer.hashicorp.com/terraform/language/state/locking",
+            "https://docs.example.com/database/connection-pooling",
         ],
         top_k=5,
     ),
     # Use keywords when you don't know exact URLs
     RAGTestCase(
-        query="consul service mesh",
-        description="Consul service mesh overview",
-        relevant_keywords=["connect", "sidecar", "proxy"],
+        query="api rate limiting",
+        description="API rate limiting overview",
+        relevant_keywords=["throttle", "quota", "limits"],
         top_k=5,
     ),
 ]
@@ -194,14 +194,14 @@ test = create_test_case_interactive(index, "my query", "Test description")
 ```json
 [
     {
-        "query": "how to configure vault namespaces",
-        "description": "Vault namespace configuration docs",
+        "query": "how to configure user authentication",
+        "description": "User authentication configuration docs",
         "relevant_urls": [
-            "https://developer.hashicorp.com/vault/docs/enterprise/namespaces"
+            "https://docs.example.com/auth/configuration"
         ],
         "relevant_keywords": [],
         "top_k": 5,
-        "metadata": {"category": "vault", "priority": "high"}
+        "metadata": {"category": "auth", "priority": "high"}
     }
 ]
 ```
